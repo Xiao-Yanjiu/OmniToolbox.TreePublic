@@ -1,4 +1,3 @@
-using Dalamud.Game.ClientState.Keys;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using Lumina.Excel.Sheets;
@@ -40,28 +39,15 @@ public sealed class CopyItemName : ModuleBase
 
     private void OnUpdate(IFramework _)
     {
-        var keyState = DService.Instance().KeyState;
-        if (!keyState[VirtualKey.CONTROL] || !keyState[VirtualKey.C] ||
-            keyState[VirtualKey.MENU] || keyState[VirtualKey.SHIFT])
-        {
-            hotkeyHeld = false;
+        if (!CopyShortcut.IsPressed(ref hotkeyHeld))
             return;
-        }
-
-        if (hotkeyHeld)
-        {
-            return;
-        }
-
-        hotkeyHeld = true;
         var hoveredItem = DService.Instance().GameGUI.HoveredItem;
         if (hoveredItem == 0)
         {
             return;
         }
 
-        keyState[VirtualKey.C] = false;
-        keyState[VirtualKey.CONTROL] = false;
+        CopyShortcut.Consume();
         if (!LuminaGetter.TryGetRow<Item>(ItemUtil.GetBaseId((uint)hoveredItem).ItemId, out var item))
         {
             return;
