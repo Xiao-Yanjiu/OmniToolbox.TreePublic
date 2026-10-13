@@ -1,8 +1,11 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.System.Framework;
 using FFXIVClientStructs.FFXIV.Client.System.Input;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using OmenTools;
+using OmenTools.Extensions;
 using OmenTools.OmenService;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
@@ -20,31 +23,45 @@ public sealed unsafe class AltF4Exit : ModuleBase
         Category = ModuleCategory.Daily
     };
 
+    private Hook<Framework.Delegates.ExitFromWindow>? ExitFromWindowHook;
+
     protected override void OnEnable()
     {
-        if (!FrameworkManager.Instance().Reg(OnUpdate))
+        ExitFromWindowHook ??= DService.Instance().Hook.HookFromMemberFunction(
+            typeof(Framework.MemberFunctionPointers),
+            nameof(Framework.MemberFunctionPointers.ExitFromWindow),
+            (Framework.Delegates.ExitFromWindow)ExitFromWindowDetour);
+        ExitFromWindowHook.Enable();
+
+        if (!FrameworkManager.Instance().Reg(OnFrameworkUpdate))
         {
-            throw new InvalidOperationException("Alt+F4 update registration failed.");
+            ExitFromWindowHook.Disable();
+            throw new InvalidOperationException("Alt+F4 exit update registration failed.");
         }
     }
 
-    protected override void OnDisable() => FrameworkManager.Instance().Unreg(OnUpdate);
+    protected override void OnDisable()
+    {
+        FrameworkManager.Instance().Unreg(OnFrameworkUpdate);
+        ExitFromWindowHook?.Disable();
+    }
 
-    private static void OnUpdate(IFramework _)
+    protected override void OnDispose() => ExitFromWindowHook?.Dispose();
+
+    private static void OnFrameworkUpdate(IFramework _)
     {
         var input = UIInputData.Instance();
         if (input is not null && input->IsKeyDown(SeVirtualKey.MENU) && input->IsKeyPressed(SeVirtualKey.F4))
         {
-            SendMessage(Process.GetCurrentProcess().MainWindowHandle, WM_CLOSE, 0, 0);
+            EndGameProcess();
         }
     }
 
-    [DllImport("user32.dll")]
-    private static extern int SendMessage(nint window, int message, int wParam, int lParam);
+    private static void ExitFromWindowDetour(Framework* framework) => EndGameProcess();
 
-    #region 常量
-
-    private const int WM_CLOSE = 0x10;
-
-    #endregion
+    private static void EndGameProcess()
+    {
+        using var process = Process.GetCurrentProcess();
+        process.Kill();
+    }
 }

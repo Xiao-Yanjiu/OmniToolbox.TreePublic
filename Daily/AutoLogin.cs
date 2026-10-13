@@ -16,6 +16,7 @@ using OmenTools.Interop.Game.Helpers;
 using OmenTools.Interop.Game.Lumina;
 using OmenTools.OmenService;
 using OmenTools.Threading.TaskHelper;
+using OmenTools.Threading.TaskHelper.Models;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -64,8 +65,8 @@ public sealed unsafe class AutoLogin(
         if (GameState.IsLoggedIn)
             suspendedUntilLogin = false;
 
-        tasks.TimeoutAction = SuspendUntilNextLogin;
-        tasks.ExceptionAction = SuspendUntilNextLogin;
+        tasks.TaskTimeout += OnTaskFailed;
+        tasks.TaskGetException += OnTaskFailed;
         DService.Instance().ClientState.Login += OnLogin;
         addonEvents = new(DalamudServices.AddonLifecycle);
         addonEvents.Register(AddonEvent.PostSetup, "LobbyDKT", OnLobbyTravel);
@@ -77,6 +78,8 @@ public sealed unsafe class AutoLogin(
 
     protected override void OnDisable()
     {
+        tasks.TaskTimeout -= OnTaskFailed;
+        tasks.TaskGetException -= OnTaskFailed;
         addonEvents?.Dispose();
         addonEvents = null;
         DService.Instance().ClientState.Login -= OnLogin;
@@ -227,6 +230,8 @@ public sealed unsafe class AutoLogin(
 
         return changed;
     }
+
+    private void OnTaskFailed(TaskHelperTask _) => SuspendUntilNextLogin();
 
     public void SuspendUntilNextLogin()
     {

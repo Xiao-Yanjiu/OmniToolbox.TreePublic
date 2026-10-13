@@ -308,9 +308,6 @@ public sealed unsafe partial class BetterGlamourManagement
         return string.Format(OmniLoc.Get("Feature.BetterGlamourManagement.UnknownHairstyle"), hairstyleID);
     }
 
-    internal static uint GetItemIcon(uint itemID) =>
-        LuminaGetter.TryGetRow<Item>(itemID, out var item) ? (uint)item.Icon : 0;
-
     internal static uint GetGlassesIcon(ushort glassesID) =>
         LuminaGetter.TryGetRow<Glasses>(glassesID, out var glasses) ? (uint)glasses.Icon : 0;
 

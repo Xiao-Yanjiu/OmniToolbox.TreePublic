@@ -13,11 +13,9 @@ internal static class AutoSortItemsPanel
         using (var optionsTable = OmniControls.SettingsTable(
                    "##autoSortItemsOptions",
                    [OmniControls.MeasureCheckbox(OmniLoc.Get("Feature.AutoSortItems.SortArmouryOnJobChange")),
-                    OmniControls.MeasureCheckbox(OmniLoc.Get("Feature.AutoSortItems.AutoMerge")),
-                    OmniControls.MeasureCheckbox(OmniLoc.Get("Feature.AutoSortItems.SendChat")),
-                    OmniControls.MeasureCheckbox(OmniLoc.Get("Feature.AutoSortItems.SendNotification"))],
-                   ["##sortArmouryOnJobChange", "##autoMerge", "##sendChat", "##sendNotification"],
-                   flags: ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoPadOuterX, columnsPerRow: 4))
+                    OmniControls.MeasureCheckbox(OmniLoc.Get("Feature.AutoSortItems.AutoMerge"))],
+                   ["##sortArmouryOnJobChange", "##autoMerge"],
+                   flags: ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoPadOuterX, columnsPerRow: 2))
         {
             if (optionsTable)
             {
@@ -38,24 +36,6 @@ internal static class AutoSortItemsPanel
                 if (OmniControls.Checkbox(OmniLoc.Get("Feature.AutoSortItems.AutoMerge"), ref autoMerge))
                 {
                     config.AutoMerge = autoMerge;
-                    changed = true;
-                }
-
-                ImGui.TableNextColumn();
-                var sendChat = config.SendChat;
-                if (OmniControls.Checkbox(OmniLoc.Get("Feature.AutoSortItems.SendChat"), ref sendChat))
-                {
-                    config.SendChat = sendChat;
-                    changed = true;
-                }
-
-                ImGui.TableNextColumn();
-                var sendNotification = config.SendNotification;
-                if (OmniControls.Checkbox(
-                        OmniLoc.Get("Feature.AutoSortItems.SendNotification"),
-                        ref sendNotification))
-                {
-                    config.SendNotification = sendNotification;
                     changed = true;
                 }
             }

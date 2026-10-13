@@ -1,81 +1,49 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Inventory;
-using Dalamud.Game.Command;
-using Dalamud.Interface.Utility.Raii;
-using Dalamud.Plugin.Ipc;
-using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using Lumina.Excel.Sheets;
-using OmniToolbox.Common.Module.Abstractions;
-using OmniToolbox.Common.Module.Enums;
-using OmniToolbox.Common.Module.Models;
-using OmniToolbox.Host;
-using OmniToolbox.UI;
-using OmniToolbox.UI.Controls;
-using OmniToolbox.UI.Theme;
-using OmenTools.Dalamud;
+using OmenTools;
 using OmenTools.Extensions;
-using OmenTools.Interop.Game.Lumina;
-using OmenTools.Interop.Game.AddonEvent;
 using OmenTools.Info.Game.Packets.Upstream;
+using OmniToolbox.UI;
 using GameEventHandler = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler;
 using GameEventHandlerContent = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerContent;
 using GameEventID = FFXIVClientStructs.FFXIV.Client.Game.Event.EventId;
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
+using GameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
 
 namespace OmniToolbox.TreePublic;
 
 public sealed partial class AutoIshgardRestoration
 {
-    private static readonly GameInventoryType[] MainInventoryTypes =
-    [
-        GameInventoryType.Inventory1,
-        GameInventoryType.Inventory2,
-        GameInventoryType.Inventory3,
-        GameInventoryType.Inventory4
-    ];
-
-    // The whitelist defines scope; client sheets supply all recipe metadata.
-
-    private const uint SKYBUILDERS_SCRIP_ITEM_ID = 28063;
-
     private void DriveStartNPCEvent(uint[] npcIDs, AutomationPhase nextPhase, string label)
     {
         if (IsOccupied())
         {
-            status = $"等待交互结束后打开{label}";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.WaitingForNPCInteraction"), label);
             return;
         }
 
-        var npc = OmenTools.DService.Instance().ObjectTable
+        var npc = DService.Instance().ObjectTable
             .FirstOrDefault(o => npcIDs.Contains(GetBaseID(o.Address)) && o.IsTargetable);
         if (npc is null)
         {
-            FailAutomation($"未找到{label}。");
+            FailAutomation(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.NPCNotFound"), label));
             return;
         }
 
         if (!SendNPCEventStart(npc.Address))
         {
-            FailAutomation($"无法打开{label}界面。");
+            FailAutomation(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.NPCEventFailed"), label));
             return;
         }
 
         EnterPhase(nextPhase);
         nextActionAt = DateTime.UtcNow.AddMilliseconds(600);
-        status = $"正在打开{label}界面";
+        status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.OpeningNPCEvent"), label);
     }
 
     private static unsafe uint ReadSkybuildersScrips()
@@ -103,20 +71,16 @@ public sealed partial class AutoIshgardRestoration
             return false;
         }
 
-        var evt = default(AtkEvent);
-        evt.Target = (AtkEventTarget*)node;
-        evt.Listener = (AtkEventListener*)addon;
-        var eventData = default(AtkEventData);
-        addon->ReceiveEvent(registered->State.EventType, (int)registered->Param, &evt, &eventData);
+        addon->ClickComponent(node, (int)registered->Param, registered->State.EventType);
         return true;
     }
 
     private static unsafe uint GetBaseID(nint address) =>
-        address == nint.Zero ? 0 : ((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)address)->BaseId;
+        address == nint.Zero ? 0 : ((GameObject*)address)->BaseId;
 
     private static unsafe bool SendNPCEventStart(nint address)
     {
-        var gameObject = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)address;
+        var gameObject = (GameObject*)address;
         if (gameObject == null || !TryResolveNPCEventID(gameObject, out var eventID))
         {
             return false;
@@ -128,7 +92,7 @@ public sealed partial class AutoIshgardRestoration
     }
 
     private static unsafe bool TryResolveNPCEventID(
-        FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject* gameObject,
+        GameObject* gameObject,
         out GameEventID eventID)
     {
         eventID = default;
@@ -193,7 +157,7 @@ public sealed partial class AutoIshgardRestoration
 
     private static bool IsOccupied()
     {
-        var condition = OmenTools.DService.Instance().Condition;
+        var condition = DService.Instance().Condition;
         return condition[ConditionFlag.Occupied]
             || condition[ConditionFlag.OccupiedInEvent]
             || condition[ConditionFlag.OccupiedInQuestEvent]
@@ -205,7 +169,7 @@ public sealed partial class AutoIshgardRestoration
 
     private static unsafe bool IsPlayerMovable()
     {
-        var services = OmenTools.DService.Instance();
+        var services = DService.Instance();
         var player = services.ObjectTable.LocalPlayer;
         if (!services.ClientState.IsLoggedIn || player is null)
         {
@@ -238,11 +202,6 @@ public sealed partial class AutoIshgardRestoration
             && GetAddon("FadeBack") == null;
     }
 
-    private static bool TrySendCommand(string command)
-    {
-        return OmenTools.DService.Instance().Command.ProcessCommand(command);
-    }
-
     private static string FormatPosition(Vector3 position) =>
         $"{position.X.ToString("0.0", CultureInfo.InvariantCulture)}, " +
         $"{position.Y.ToString("0.0", CultureInfo.InvariantCulture)}, " +
@@ -250,7 +209,7 @@ public sealed partial class AutoIshgardRestoration
 
     private static unsafe AtkUnitBase* GetAddon(string name)
     {
-        var addon = OmenTools.DService.Instance().GameGUI.GetAddonByName<AtkUnitBase>(name);
+        var addon = DService.Instance().GameGUI.GetAddonByName<AtkUnitBase>(name);
         return addon != null && addon->IsVisible ? addon : null;
     }
 
@@ -270,7 +229,7 @@ public sealed partial class AutoIshgardRestoration
         var itemCount = 0;
         foreach (var type in MainInventoryTypes)
         {
-            var items = OmenTools.DService.Instance().GameInventory.GetInventoryItems(type);
+            var items = DService.Instance().GameInventory.GetInventoryItems(type);
             totalSlots += items.Length;
             foreach (ref readonly var item in items)
             {
@@ -289,4 +248,18 @@ public sealed partial class AutoIshgardRestoration
     }
 
     private readonly record struct InventorySnapshot(int FreeSlots, int TotalSlots, int ItemCount);
+
+    private static readonly GameInventoryType[] MainInventoryTypes =
+    [
+        GameInventoryType.Inventory1,
+        GameInventoryType.Inventory2,
+        GameInventoryType.Inventory3,
+        GameInventoryType.Inventory4
+    ];
+
+    #region 常量
+
+    private const uint SKYBUILDERS_SCRIP_ITEM_ID = 28063;
+
+    #endregion
 }

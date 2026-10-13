@@ -17,7 +17,6 @@ using OmniToolbox.Common.Module.Models;
 using OmniToolbox.Config;
 using OmniToolbox.Host;
 using OmniToolbox.Lifecycle;
-using OmniToolbox.Notifications;
 using OmniToolbox.UI;
 
 namespace OmniToolbox.TreePublic;
@@ -167,7 +166,7 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         queuedCategories.Clear();
         if (IsCategoryVisible("retainer"))
         {
-            QueueCategory("retainer", true, manual: true);
+            QueueCategory("retainer", manual: true);
             return;
         }
 
@@ -178,20 +177,26 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
                 QueueCategory("inventory", manual: true);
             }
 
-            QueueSaddlebags(true, manual: true);
+            QueueSaddlebags(manual: true);
             return;
         }
 
-        QueueAllEnabled(true, manual: true);
+        QueueAllEnabled(manual: true);
     }
 
-    private void EnsureTaskHelper() => taskHelper ??= new()
+    private void EnsureTaskHelper()
     {
-        RetryIntervalMS = 100,
-        TimeoutMS = SORT_TIMEOUT_MS,
-        TimeoutAction = queuedCategories.Clear,
-        ExceptionAction = queuedCategories.Clear
-    };
+        if (taskHelper is not null)
+            return;
+
+        taskHelper = new()
+        {
+            RetryIntervalMS = 100,
+            TimeoutMS = SORT_TIMEOUT_MS
+        };
+        taskHelper.TaskTimeout += _ => queuedCategories.Clear();
+        taskHelper.TaskGetException += _ => queuedCategories.Clear();
+    }
 
     private void RegisterAutoSortAddon(string addonName, System.Action queueAction) =>
         addonEvents!.Register(AddonEvent.PostShow, addonName, (_, _) => queueAction());
@@ -204,10 +209,9 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         }
     }
 
-    private void QueueAllEnabled(bool notify, bool manual)
+    private void QueueAllEnabled(bool manual)
     {
         EnsureRules(config);
-        var queued = false;
         foreach (var category in config.Rules!
                      .Where(rule => rule.Category is not null)
                      .Select(rule => rule.Category!)
@@ -221,17 +225,11 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
                     category,
                     waitForMergeContainers: config.AutoMerge && category is "saddlebag" or "rightsaddlebag",
                     manual: manual);
-                queued = true;
             }
-        }
-
-        if (notify && queued && taskHelper is not null)
-        {
-            taskHelper.Enqueue(NotifySortCompleted, "Notify sort completed");
         }
     }
 
-    private void QueueArmoury(bool notify = false)
+    private void QueueArmoury()
     {
         EnsureRules(config);
         foreach (var category in config.Rules!
@@ -240,11 +238,11 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
                      .Distinct(StringComparer.Ordinal)
                      .Where(IsCategoryEnabled))
         {
-            QueueCategory(category, notify);
+            QueueCategory(category);
         }
     }
 
-    private void QueueSaddlebags(bool notify = false, bool manual = false)
+    private void QueueSaddlebags(bool manual = false)
     {
         EnsureRules(config);
         var queued = new HashSet<string>(StringComparer.Ordinal);
@@ -267,17 +265,10 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         {
             QueueCategory("rightsaddlebag", manual: manual);
         }
-
-        if (notify && taskHelper is not null &&
-            (queuedCategories.Contains("saddlebag") || queuedCategories.Contains("rightsaddlebag")))
-        {
-            taskHelper.Enqueue(NotifySortCompleted, "Notify sort completed");
-        }
     }
 
     private void QueueCategory(
         string category,
-        bool notify = false,
         bool waitForMergeContainers = false,
         bool manual = false)
     {
@@ -327,7 +318,7 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
             taskHelper.Enqueue(() => StartSort(category, rules, manual), $"Start sort {category}");
         }
 
-        taskHelper.Enqueue(() => FinishSort(category, notify), $"Finish sort {category}");
+        taskHelper.Enqueue(() => FinishSort(category), $"Finish sort {category}");
     }
 
     private bool StartSort(string category, IReadOnlyList<AutoSortItemsRule> rules, bool manual)
@@ -344,7 +335,7 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         }
 
         var command = $"/itemsort clear {categoryCommand}";
-        ChatManager.Instance().SendMessage(command);
+        ChatManager.Instance().SendCommand(command);
         foreach (var rule in rules)
         {
             var condition = GetCommand(Conditions, rule.Condition);
@@ -352,7 +343,7 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
             if (!string.IsNullOrEmpty(condition) && !string.IsNullOrEmpty(order))
             {
                 command = $"/itemsort condition {categoryCommand} {condition} {order}";
-                ChatManager.Instance().SendMessage(command);
+                ChatManager.Instance().SendCommand(command);
             }
         }
 
@@ -362,29 +353,12 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
             if (!string.IsNullOrEmpty(tab))
             {
                 command = $"/itemsort condition {categoryCommand} {tab}";
-                ChatManager.Instance().SendMessage(command);
+                ChatManager.Instance().SendCommand(command);
             }
         }
 
         command = $"/itemsort execute {categoryCommand}";
-        ChatManager.Instance().SendMessage(command);
-        return true;
-    }
-
-    private bool NotifySortCompleted()
-    {
-        if (config.SendChat)
-        {
-            OmniNotifier.Chat(OmniLoc.Get("Feature.AutoSortItems.Completed"));
-        }
-
-        if (config.SendNotification)
-        {
-            OmniNotifier.Popup(
-                OmniLoc.Get("AutoSortItemsTitle"),
-                OmniLoc.Get("Feature.AutoSortItems.Completed"));
-        }
-
+        ChatManager.Instance().SendCommand(command);
         return true;
     }
 
@@ -475,14 +449,9 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         return manual || !hasMergeCandidate;
     }
 
-    private bool FinishSort(string category, bool notify)
+    private bool FinishSort(string category)
     {
         queuedCategories.Remove(category);
-        if (notify)
-        {
-            NotifySortCompleted();
-        }
-
         return true;
     }
 
@@ -789,10 +758,6 @@ public sealed class AutoSortItemsConfig
     public int InventoryItemLevel { get; set; }
 
     public int InventoryTab { get; set; } = 1;
-
-    public bool SendChat { get; set; }
-
-    public bool SendNotification { get; set; } = true;
 }
 
 [Serializable]

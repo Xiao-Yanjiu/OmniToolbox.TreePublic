@@ -94,27 +94,23 @@ public sealed class FoodReminder : ModuleBase
     {
         if (!DService.Instance().ClientState.IsLoggedIn)
         {
-            OmniNotifier.Chat(OmniLoc.Get("Feature.FoodReminder.NotLoggedIn"));
+            DalamudServices.PluginLog.Warning("Food reminder manual check requires a logged-in character.");
             return;
         }
 
         if (!IsAllowedTerritory())
         {
-            OmniNotifier.Chat(OmniLoc.Get("Feature.FoodReminder.TerritoryDisabled"));
+            DalamudServices.PluginLog.Warning("Food reminder manual check is disabled in territory {TerritoryID}.", DService.Instance().ClientState.TerritoryType);
             return;
         }
 
         try
         {
-            if (CheckAndNotify() == 0)
-            {
-                OmniNotifier.Chat(OmniLoc.Get("Feature.FoodReminder.CheckComplete"));
-            }
+            CheckAndNotify();
         }
         catch (Exception ex)
         {
             DalamudServices.PluginLog.Warning(ex, "Food reminder manual check failed.");
-            OmniNotifier.Chat(OmniLoc.Get("Feature.FoodReminder.CheckFailed"));
         }
     }
 
@@ -145,14 +141,13 @@ public sealed class FoodReminder : ModuleBase
         }
     }
 
-    private int CheckAndNotify()
+    private void CheckAndNotify()
     {
-        var count = 0;
         seenTargets.Clear();
         var services = DService.Instance();
         if (services.ObjectTable.LocalPlayer is { } localPlayer)
         {
-            count += TryRemind(new(
+            TryRemind(new(
                 localPlayer.Name,
                 GetJobName(localPlayer.ClassJob),
                 services.PlayerState.ContentId,
@@ -171,7 +166,7 @@ public sealed class FoodReminder : ModuleBase
             var memberObject = services.ObjectTable.SearchByEntityID(
                                    member.EntityId,
                                    OmenObjectTable.CharactersRange) as IBattleChara;
-            count += TryRemind(new(
+            TryRemind(new(
                                    member.Name.TextValue,
                                    GetJobName(member.ClassJob),
                                    member.ContentId,
@@ -179,24 +174,21 @@ public sealed class FoodReminder : ModuleBase
                                    member.EntityId,
                                    GetFoodRemainingSeconds(memberObject)));
         }
-
-        return count;
     }
 
-    private int TryRemind(FoodCheckTarget target)
+    private void TryRemind(FoodCheckTarget target)
     {
         if (string.IsNullOrWhiteSpace(target.Name) || !seenTargets.Add(GetDeduplicationKey(target)))
         {
-            return 0;
+            return;
         }
 
         if (!ShouldRemind(target))
         {
-            return 0;
+            return;
         }
 
         SendMissingFoodReminder(target);
-        return 1;
     }
 
     private bool ShouldRemind(FoodCheckTarget target) =>

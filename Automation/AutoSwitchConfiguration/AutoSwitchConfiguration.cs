@@ -10,7 +10,6 @@ using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
 using OmniToolbox.Host;
-using OmniToolbox.Notifications;
 using OmniToolbox.UI;
 
 namespace OmniToolbox.TreePublic;
@@ -47,10 +46,10 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
         taskHelper = new()
         {
             RetryIntervalMS = 100,
-            TimeoutMS = 30_000,
-            TimeoutAction = () => Fail("Feature.AutoSwitchConfiguration.Timeout"),
-            ExceptionAction = () => Fail("Feature.AutoSwitchConfiguration.Failed")
+            TimeoutMS = 30_000
         };
+        taskHelper.TaskTimeout += _ => Fail("Timed out.");
+        taskHelper.TaskGetException += _ => Fail("Task execution failed.");
         var clientState = DService.Instance().ClientState;
         clientState.TerritoryChanged += OnTerritoryChanged;
         clientState.Login += OnLogin;
@@ -131,7 +130,7 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
                     return false;
                 if (!TryResolveGearset(rule.ClassJobID, gearsetID, out var resolvedGearset))
                 {
-                    Fail("Feature.AutoSwitchConfiguration.InvalidGearset");
+                    Fail("The target job has no matching available gearset.");
                     return true;
                 }
 
@@ -139,7 +138,7 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
                 if (IsGearsetEquipped(gearsetID, rule.ClassJobID))
                     return true;
                 if (!LocalPlayerState.SwitchGearset(resolvedGearset))
-                    Fail("Feature.AutoSwitchConfiguration.InvalidGearset");
+                    Fail("The target job has no matching available gearset.");
                 return true;
             });
             tasks.Enqueue(() => !IsCurrentFlow(token, territory) ||
@@ -194,7 +193,7 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
                     if (!collectionTask.IsCompleted)
                         return false;
                     if (!collectionTask.GetAwaiter().GetResult())
-                        Fail("Feature.AutoSwitchConfiguration.CollectionFailed");
+                        Fail("Plugin collection operation failed.");
                     return true;
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -204,7 +203,7 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
                 catch (Exception exception)
                 {
                     DService.Instance().Log.Warning(exception, "Auto switch configuration failed to change a plugin collection.");
-                    Fail("Feature.AutoSwitchConfiguration.CollectionFailed");
+                    Fail("Plugin collection operation failed.");
                     return true;
                 }
             });
@@ -225,10 +224,10 @@ public sealed partial class AutoSwitchConfiguration : ModuleBase
         taskHelper?.Abort();
     }
 
-    private void Fail(string key)
+    private void Fail(string reason)
     {
         CancelFlow();
-        OmniNotifier.Chat(OmniLoc.Get(key));
+        DalamudServices.PluginLog.Warning("Auto switch configuration failed: {Reason}", reason);
     }
 
     private bool IsCurrentFlow(CancellationToken token, uint territory) => !token.IsCancellationRequested &&

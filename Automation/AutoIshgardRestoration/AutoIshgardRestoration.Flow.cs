@@ -1,39 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.Inventory;
-using Dalamud.Game.Command;
-using Dalamud.Interface.Utility.Raii;
-using Dalamud.Plugin.Ipc;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Game;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using FFXIVClientStructs.FFXIV.Component.GUI;
-using Lumina.Excel.Sheets;
-using OmniToolbox.Common.Module.Abstractions;
-using OmniToolbox.Common.Module.Enums;
-using OmniToolbox.Common.Module.Models;
+using OmenTools;
+using OmenTools.Extensions;
 using OmniToolbox.Host;
 using OmniToolbox.UI;
-using OmniToolbox.UI.Controls;
-using OmniToolbox.UI.Theme;
-using OmenTools.Dalamud;
-using OmenTools.Extensions;
-using OmenTools.Interop.Game.Lumina;
-using OmenTools.Interop.Game.AddonEvent;
-using OmenTools.Info.Game.Packets.Upstream;
-using GameEventHandler = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler;
-using GameEventHandlerContent = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerContent;
-using GameEventID = FFXIVClientStructs.FFXIV.Client.Game.Event.EventId;
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
 
 namespace OmniToolbox.TreePublic;
 
@@ -53,9 +25,11 @@ public sealed partial class AutoIshgardRestoration
 
     private AutomationPhase phase;
 
-    private string status = "待机";
+    private string status = OmniLoc.Get("Feature.AutoIshgardRestoration.Idle");
 
     private string lastError = string.Empty;
+
+    private Dictionary<AutomationPhase, Action<RecipeOption>> automationHandlers = [];
 
     private void StartProduction()
     {
@@ -68,33 +42,41 @@ public sealed partial class AutoIshgardRestoration
         var playerState = DalamudServices.PlayerState;
         if (!playerState.IsLoaded)
         {
-            Fail("角色尚未登录。");
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.PlayerNotLoggedIn"));
             return;
         }
+
+        if (TryStopAtScripThreshold()) return;
 
         var currentJobID = playerState.ClassJob.RowId;
         if (currentJobID is < 8 or > 15)
         {
-            Fail("当前不是生产职业，请切换职业。");
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.CraftingJobRequired"));
             return;
         }
 
         var recipe = FindRecipe(config.SelectedRecipeID);
         if (recipe is null || recipe.Value.JobID != currentJobID)
         {
-            Fail("请先选择你要生产的物品。");
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.RecipeSelectionRequired"));
             return;
         }
 
         if (playerState.Level < recipe.Value.Level)
         {
-            Fail($"当前职业等级不足，需要 {recipe.Value.Level} 级。");
+            Fail(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.JobLevelRequired"), recipe.Value.Level));
+            return;
+        }
+
+        if (!DalamudServices.PluginInterface.IsPluginEnabled("Artisan"))
+        {
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ArtisanUnavailable"));
             return;
         }
 
         if (artisanIsBusy?.InvokeFunc() == true)
         {
-            Fail("Artisan 正在执行其他任务。");
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanBusy"));
             return;
         }
 
@@ -105,21 +87,21 @@ public sealed partial class AutoIshgardRestoration
         activeItemID = recipe.Value.ItemID;
         nextCheckAt = DateTime.UtcNow;
 
-        if (OmenTools.DService.Instance().ClientState.TerritoryType != FIRMAMENT_TERRITORY_ID)
+        if (DService.Instance().ClientState.TerritoryType != FIRMAMENT_TERRITORY_ID)
         {
-            if (!TrySendCommand(FIRMAMENT_TELEPORT_COMMAND))
+            if (!DService.Instance().Command.ProcessCommand(FIRMAMENT_TELEPORT_COMMAND))
             {
-                FailAutomation("无法执行传送指令 /omni bts 无名众人广场。");
+                FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.TeleportCommandFailed"));
                 return;
             }
 
             EnterPhase(AutomationPhase.WaitForFirmament);
-            status = "正在前往无名众人广场，等待进入天穹街（区域 886）";
+            status = OmniLoc.Get("Feature.AutoIshgardRestoration.TeleportingToFirmament");
             return;
         }
 
         EnterPhase(AutomationPhase.WaitForPlayerMovable);
-        status = "已在天穹街，等待玩家连续可动 1 秒";
+        status = OmniLoc.Get("Feature.AutoIshgardRestoration.AlreadyInFirmament");
     }
 
     private void StopProduction(string reason)
@@ -164,6 +146,8 @@ public sealed partial class AutoIshgardRestoration
         }
 
         nextCheckAt = DateTime.UtcNow.AddMilliseconds(100);
+        if (TryStopAtScripThreshold()) return;
+
         UpdateVoucherCount(DateTime.UtcNow);
         if (IsScripPurchasePhase())
         {
@@ -174,14 +158,12 @@ public sealed partial class AutoIshgardRestoration
         var activeRecipe = FindRecipe(activeRecipeID);
         if (activeRecipe is null || activeRecipe.Value.ItemID != activeItemID)
         {
-            StopProduction("运行数据无效，已停止");
+            StopProduction(OmniLoc.Get("Feature.AutoIshgardRestoration.InvalidRunData"));
             return;
         }
 
         DriveAutomation(activeRecipe.Value);
     }
-
-    private Dictionary<AutomationPhase, Action<RecipeOption>> automationHandlers = [];
 
     private void EnsureAutomationHandlers()
     {
@@ -195,7 +177,7 @@ public sealed partial class AutoIshgardRestoration
             [AutomationPhase.Crafting] = DriveCrafting,
             [AutomationPhase.WaitArtisanStop] = _ => DriveWaitArtisanStop(),
             [AutomationPhase.MoveToAppraiser] = _ => DriveStartNPCEvent(
-                [APPRAISER_NPC_ID_1, APPRAISER_NPC_ID_2], AutomationPhase.OpenAppraiser, "提交NPC"),
+                [APPRAISER_NPC_ID_1, APPRAISER_NPC_ID_2], AutomationPhase.OpenAppraiser, OmniLoc.Get("Feature.AutoIshgardRestoration.AppraiserNPC")),
             [AutomationPhase.OpenAppraiser] = _ => DriveOpenAppraiser(),
             [AutomationPhase.SelectJob] = DriveSelectJob,
             [AutomationPhase.SelectItem] = DriveSelectItem,
@@ -203,7 +185,7 @@ public sealed partial class AutoIshgardRestoration
             [AutomationPhase.WaitTurnIn] = DriveWaitTurnIn,
             [AutomationPhase.WaitSupplyRefresh] = DriveWaitSupplyRefresh,
             [AutomationPhase.MoveToLottery] = _ => DriveStartNPCEvent(
-                [LOTTERY_NPC_ID], AutomationPhase.OpenLottery, "库啵好运道NPC"),
+                [LOTTERY_NPC_ID], AutomationPhase.OpenLottery, OmniLoc.Get("Feature.AutoIshgardRestoration.LotteryNPC")),
             [AutomationPhase.OpenLottery] = _ => DriveOpenLottery(),
             [AutomationPhase.PlayLottery] = _ => DrivePlayLottery(),
             [AutomationPhase.PostLottery] = DrivePostLottery,
@@ -227,20 +209,20 @@ public sealed partial class AutoIshgardRestoration
         {
             RequestArtisanStop();
             EnterPhase(AutomationPhase.WaitArtisanStop);
-            status = $"{reason}；等待 Artisan 停止";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.WaitingForArtisanStop"), reason);
         }
         else if (artisanIsBusy?.InvokeFunc() == true)
         {
             EnterPhase(AutomationPhase.Crafting);
-            status = $"Artisan 生产中：{recipe.ItemName}";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanCrafting"), recipe.ItemName);
         }
         else if (PhaseTimedOut(TimeSpan.FromSeconds(15)))
         {
             artisanStartedByModule = false;
             if (snapshot.ItemCount > craftCycleStartingItemCount)
-                BeginSubmission("Artisan 已完成本轮生产");
+                BeginSubmission(OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanCycleCompleted"));
             else
-                CompleteAutomation($"无法继续制作 {recipe.ItemName}，可能缺少材料或不满足制作条件");
+                CompleteAutomation(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.CannotContinueCrafting"), recipe.ItemName));
         }
     }
 
@@ -251,15 +233,15 @@ public sealed partial class AutoIshgardRestoration
         {
             RequestArtisanStop();
             EnterPhase(AutomationPhase.WaitArtisanStop);
-            status = $"{reason}；等待 Artisan 停止";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.WaitingForArtisanStop"), reason);
         }
         else if (artisanIsBusy?.InvokeFunc() == false)
         {
             artisanStartedByModule = false;
             if (snapshot.ItemCount > craftCycleStartingItemCount)
-                BeginSubmission("Artisan 已结束本轮生产");
+                BeginSubmission(OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanCycleEnded"));
             else
-                CompleteAutomation($"无法继续制作 {recipe.ItemName}，可能缺少材料或不满足制作条件");
+                CompleteAutomation(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.CannotContinueCrafting"), recipe.ItemName));
         }
     }
 
@@ -268,11 +250,11 @@ public sealed partial class AutoIshgardRestoration
         if (artisanIsBusy?.InvokeFunc() == false)
         {
             artisanStartedByModule = false;
-            BeginSubmission("Artisan 已停止");
+            BeginSubmission(OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanStopped"));
         }
         else if (PhaseTimedOut(TimeSpan.FromSeconds(30)))
         {
-            FailAutomation("等待 Artisan 停止超时。");
+            FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.ArtisanStopTimedOut"));
         }
     }
 
@@ -282,7 +264,7 @@ public sealed partial class AutoIshgardRestoration
         CloseAddon("HWDSupply");
         EnterPhase(AutomationPhase.PrepareNextCycle);
         nextActionAt = DateTime.UtcNow.AddMilliseconds(800);
-        status = $"{reason}；准备下一轮生产";
+        status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.PreparingNextCraftingCycle"), reason);
     }
 
     private unsafe void DrivePrepareNextCycle(RecipeOption recipe)
@@ -297,21 +279,21 @@ public sealed partial class AutoIshgardRestoration
             CloseAddon("Request");
             CloseAddon("HWDSupply");
             nextActionAt = DateTime.UtcNow.AddMilliseconds(500);
-            status = "正在关闭提交界面，准备下一轮生产";
+            status = OmniLoc.Get("Feature.AutoIshgardRestoration.ClosingSupplyForCrafting");
             return;
         }
 
         if (IsOccupied())
         {
-            status = "等待交互结束，准备下一轮生产";
+            status = OmniLoc.Get("Feature.AutoIshgardRestoration.WaitingForInteractionBeforeCrafting");
             if (PhaseTimedOut(TimeSpan.FromSeconds(20)))
             {
-                FailAutomation("准备下一轮生产时，玩家长时间处于不可操作状态。");
+                FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.PlayerOccupiedBeforeCrafting"));
             }
             return;
         }
 
-        StartCraftingCycle(recipe, "开始下一轮");
+        StartCraftingCycle(recipe, OmniLoc.Get("Feature.AutoIshgardRestoration.StartingNextCycle"));
     }
 
     private void EnterPhase(AutomationPhase next)
@@ -347,20 +329,14 @@ public sealed partial class AutoIshgardRestoration
         running = false;
         phase = AutomationPhase.Idle;
         lastError = message;
-        status = "自动流程已停止";
+        status = OmniLoc.Get("Feature.AutoIshgardRestoration.AutomationStopped");
     }
 
     private bool ShouldStop(InventorySnapshot snapshot, out string reason)
     {
-        if (config.StopMode == 0 && snapshot.FreeSlots <= config.MinimumFreeSlots)
+        if (snapshot.FreeSlots <= 5)
         {
-            reason = $"背包只剩 {snapshot.FreeSlots} 格，已停止生产并准备提交";
-            return true;
-        }
-
-        if (config.StopMode == 1 && snapshot.ItemCount >= config.TargetItemCount)
-        {
-            reason = $"目标物品已达到 {snapshot.ItemCount} 个，已停止生产并准备提交";
+            reason = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.StoppedForFreeSlots"), snapshot.FreeSlots);
             return true;
         }
 
@@ -368,10 +344,23 @@ public sealed partial class AutoIshgardRestoration
         return false;
     }
 
+    private bool TryStopAtScripThreshold()
+    {
+        if (config.AutoBuyScrips) return false;
+
+        var balance = ReadSkybuildersScrips();
+        var threshold = Math.Clamp(config.ScripStopThreshold, 1, 10000);
+        if (balance < threshold) return false;
+
+        StopProduction(string.Format(CultureInfo.InvariantCulture,
+            OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ScripStopReached"), balance, threshold));
+        return true;
+    }
+
     private void Fail(string message)
     {
         lastError = message;
-        status = "无法开始";
+        status = OmniLoc.Get("Feature.AutoIshgardRestoration.CannotStart");
     }
 
     private enum AutomationPhase

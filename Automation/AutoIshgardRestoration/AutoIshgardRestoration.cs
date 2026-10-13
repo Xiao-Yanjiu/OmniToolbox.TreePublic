@@ -1,0 +1,128 @@
+using OmenTools.OmenService;
+using OmniToolbox.Common.Module.Abstractions;
+using OmniToolbox.Common.Module.Enums;
+using OmniToolbox.Common.Module.Models;
+using OmniToolbox.Host;
+using OmniToolbox.UI;
+using Action = System.Action;
+
+namespace OmniToolbox.TreePublic;
+
+public sealed partial class AutoIshgardRestoration : ModuleBase
+{
+    public override ModuleInfo Info { get; } = new()
+    {
+        Title = OmniLoc.Get("AutoIshgardRestorationTitle"),
+        Description = OmniLoc.Get("AutoIshgardRestorationDescription"),
+        Category = ModuleCategory.Automation,
+        Author = "Angelways",
+        SupportUrls = ["https://github.com/Angelways"],
+        Commands =
+        [
+            new(OmniLoc.Get("Feature.AutoIshgardRestoration.OpenCommand"), "/omni 自动重建伊修加德")
+        ]
+    };
+
+    public override bool HasSettings => true;
+
+    private readonly Config config;
+    private readonly Action saveConfig;
+    private bool startPending;
+
+    public AutoIshgardRestoration(Config config, Action saveConfig)
+    {
+        this.config = config;
+        this.saveConfig = saveConfig;
+    }
+
+    protected override void OnEnable()
+    {
+        if (!GameState.IsCN)
+            throw new InvalidOperationException(OmniLoc.Get("Feature.AutoIshgardRestoration.CNOnly"));
+
+        status = OmniLoc.Get("Feature.AutoIshgardRestoration.Idle");
+        DalamudServices.Framework.Update += OnFrameworkUpdate;
+        DalamudServices.PluginInterface.UiBuilder.Draw += DrawConfigurationWindow;
+    }
+
+    protected override void OnDisable()
+    {
+        DalamudServices.Framework.Update -= OnFrameworkUpdate;
+        DalamudServices.PluginInterface.UiBuilder.Draw -= DrawConfigurationWindow;
+        startPending = false;
+        var previousStatus = status;
+        StopProduction(OmniLoc.Get("Feature.AutoIshgardRestoration.Disabled"));
+        if (!string.IsNullOrEmpty(lastError))
+            status = previousStatus;
+        ReleaseArtisan();
+        windowOpen = false;
+    }
+
+    protected override bool OnInterruptAutomation()
+    {
+        if (!IsEnabled)
+            return false;
+        startPending = false;
+        StopProduction(OmniLoc.Get("Feature.AutoIshgardRestoration.Interrupted"));
+        return true;
+    }
+
+    public override bool TryHandleCommand(string arguments) => HandleCommandArguments(arguments);
+
+    public override bool TryHandleCommand(string command, string arguments)
+    {
+        if (string.Equals(command.Trim(), ModuleName, StringComparison.OrdinalIgnoreCase))
+            return HandleCommandArguments(arguments);
+
+        return string.IsNullOrWhiteSpace(arguments) && HandleCommandArguments(command);
+    }
+
+    public override bool ResetSettings()
+    {
+        var defaults = new Config();
+        config.SelectedRecipeID = defaults.SelectedRecipeID;
+        config.TicketThreshold = defaults.TicketThreshold;
+        config.AutoBuyScrips = defaults.AutoBuyScrips;
+        config.ScripStopThreshold = defaults.ScripStopThreshold;
+        config.ScripThreshold = defaults.ScripThreshold;
+        config.ScripShopID = defaults.ScripShopID;
+        config.ScripItemID = defaults.ScripItemID;
+        config.ScripQuantity = defaults.ScripQuantity;
+        saveConfig();
+        return true;
+    }
+
+    private bool HandleCommandArguments(string arguments)
+    {
+        var command = arguments.Trim();
+        if (string.Equals(command, "自动重建伊修加德", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "open", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "窗口", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenConfigurationWindow();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ToggleProduction()
+    {
+        if (!IsEnabled)
+        {
+            Fail(OmniLoc.Get("Feature.AutoIshgardRestoration.EnableFirst"));
+            return;
+        }
+
+        if (running || startPending)
+        {
+            startPending = false;
+            StopProduction(OmniLoc.Get("Feature.AutoIshgardRestoration.Stopped"));
+            return;
+        }
+
+        lastError = string.Empty;
+        status = OmniLoc.Get("Feature.AutoIshgardRestoration.StartPending");
+        startPending = true;
+    }
+}

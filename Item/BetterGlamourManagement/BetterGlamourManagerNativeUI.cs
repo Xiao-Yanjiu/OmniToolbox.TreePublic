@@ -8,6 +8,7 @@ using KamiToolKit.Nodes;
 using KamiToolKit.Nodes.Simplified;
 using Lumina.Text.ReadOnly;
 using OmenTools.Extensions;
+using OmenTools.Interop.Game.Lumina;
 using OmniToolbox.UI;
 
 namespace OmniToolbox.TreePublic;
@@ -808,7 +809,7 @@ internal sealed class BetterGlamourEditorListItemNode : ListItemNode<BetterGlamo
         {
             BetterGlamourEditorItemKind.Hairstyle => BetterGlamourManagement.GetHairstyleIcon(itemData.Preset.HairstyleID),
             BetterGlamourEditorItemKind.Glasses => BetterGlamourManagement.GetGlassesIcon(itemData.Preset.GlassesID),
-            _ => BetterGlamourManagement.GetItemIcon(itemData.Item!.ItemID)
+            _ => LuminaWrapper.GetItemIconID(itemData.Item!.ItemID)
         };
         itemIconNode.ItemTooltip = itemData.Kind == BetterGlamourEditorItemKind.Item
             ? itemData.Item!.ItemID
@@ -888,7 +889,7 @@ internal sealed class BetterGlamourEditorListItemNode : ListItemNode<BetterGlamo
                 break;
             case BetterGlamourEditorItemKind.Item when row.Item is { } item:
                 item.ItemID = result.ItemID;
-                itemIconNode.IconID = BetterGlamourManagement.GetItemIcon(item.ItemID);
+                itemIconNode.IconID = LuminaWrapper.GetItemIconID(item.ItemID);
                 itemIconNode.ItemTooltip = item.ItemID;
                 break;
         }

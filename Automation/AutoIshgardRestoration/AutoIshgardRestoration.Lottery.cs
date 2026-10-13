@@ -1,45 +1,20 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.Inventory;
-using Dalamud.Game.Command;
-using Dalamud.Interface.Utility.Raii;
-using Dalamud.Plugin.Ipc;
-using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using Lumina.Excel.Sheets;
-using OmniToolbox.Common.Module.Abstractions;
-using OmniToolbox.Common.Module.Enums;
-using OmniToolbox.Common.Module.Models;
-using OmniToolbox.Host;
-using OmniToolbox.UI;
-using OmniToolbox.UI.Controls;
-using OmniToolbox.UI.Theme;
-using OmenTools.Dalamud;
+using OmenTools;
 using OmenTools.Extensions;
-using OmenTools.Interop.Game.Lumina;
-using OmenTools.Interop.Game.AddonEvent;
-using OmenTools.Info.Game.Packets.Upstream;
-using GameEventHandler = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler;
-using GameEventHandlerContent = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerContent;
-using GameEventID = FFXIVClientStructs.FFXIV.Client.Game.Event.EventId;
+using OmniToolbox.UI;
 using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
 
 namespace OmniToolbox.TreePublic;
 
 public sealed partial class AutoIshgardRestoration
 {
-    private static readonly Regex VOUCHER_PATTERN = new("^(\\d+)/(\\d+)$", RegexOptions.Compiled);
+    private static readonly Regex VoucherPattern = new("^(\\d+)/(\\d+)$", RegexOptions.Compiled);
 
     private int ticketsToPlay;
 
@@ -55,10 +30,6 @@ public sealed partial class AutoIshgardRestoration
 
     private int voucherLimit = -1;
 
-    private const int RIGHT_LOTTERY_EVENT_PARAM = 22;
-
-    private const uint LOTTERY_NPC_ID = 1031692;
-
     private unsafe void DriveOpenLottery()
     {
         var lottery = (AddonHWDLottery*)GetAddon("HWDLottery");
@@ -66,10 +37,10 @@ public sealed partial class AutoIshgardRestoration
         {
             if (!lottery->AtkUnitBase.IsReady)
             {
-                status = "等待库啵好运道界面初始化";
+                status = OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryInitializing");
                 if (PhaseTimedOut(TimeSpan.FromSeconds(15)))
                 {
-                    FailAutomation("HWDLottery 界面已显示但未完成初始化。");
+                    FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryNotInitialized"));
                 }
                 return;
             }
@@ -100,7 +71,7 @@ public sealed partial class AutoIshgardRestoration
 
         if (PhaseTimedOut(TimeSpan.FromSeconds(15)))
         {
-            FailAutomation("未能打开 HWDLottery 抽奖界面。");
+            FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryOpenFailed"));
         }
     }
 
@@ -113,18 +84,18 @@ public sealed partial class AutoIshgardRestoration
             {
                 EnterPhase(AutomationPhase.PostLottery);
                 nextActionAt = DateTime.UtcNow.AddMilliseconds(700);
-                status = $"已完成一张票，剩余 {ticketsToPlay} 张";
+                status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryTicketComplete"), ticketsToPlay);
             }
             else if (PhaseTimedOut(TimeSpan.FromSeconds(10)))
             {
-                FailAutomation("抽奖界面在刮奖前关闭。");
+                FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryClosedEarly"));
             }
             return;
         }
 
         if (!addon->AtkUnitBase.IsReady)
         {
-            status = "等待库啵好运道界面准备完成";
+            status = OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryPreparing");
             return;
         }
 
@@ -151,16 +122,19 @@ public sealed partial class AutoIshgardRestoration
             {
                 ClickButton(&addon->AtkUnitBase, addon->CloseButton);
                 nextActionAt = DateTime.UtcNow.AddMilliseconds(500);
-                status = $"本张票已揭晓，正在关闭结果（剩余 {ticketsToPlay} 张）";
+                status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryResultClosing"), ticketsToPlay);
             }
         }
         else if (addon->Stage == 2)
         {
-            status = $"库啵好运道揭晓中（剩余 {ticketsToPlay} 张）";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryRevealing"), ticketsToPlay);
         }
         else if (!lotteryScratched && DateTime.UtcNow >= nextActionAt)
         {
-            var evt = new AtkEvent { Param = RIGHT_LOTTERY_EVENT_PARAM };
+            var evt = new AtkEvent
+            {
+                Param = RIGHT_LOTTERY_EVENT_PARAM
+            };
             var eventData = default(AtkEventData);
             addon->AtkUnitBase.ReceiveEvent(
                 AtkEventType.ButtonClick,
@@ -169,12 +143,12 @@ public sealed partial class AutoIshgardRestoration
                 &eventData);
             lotteryScratchAttempts++;
             nextActionAt = DateTime.UtcNow.AddMilliseconds(1500);
-            status = $"已触发右侧三格按钮，第 {lotteryScratchAttempts} 次尝试，等待界面确认";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryScratchAttempt"), lotteryScratchAttempts);
         }
 
         if (PhaseTimedOut(TimeSpan.FromSeconds(30)))
         {
-            FailAutomation("等待库啵好运道揭晓超时。");
+            FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryRevealTimedOut"));
         }
     }
 
@@ -190,7 +164,7 @@ public sealed partial class AutoIshgardRestoration
         {
             if (!lottery->AtkUnitBase.IsReady)
             {
-                status = "等待下一张库啵好运票界面初始化";
+                status = OmniLoc.Get("Feature.AutoIshgardRestoration.UI.NextLotteryInitializing");
                 return;
             }
 
@@ -202,7 +176,7 @@ public sealed partial class AutoIshgardRestoration
             {
                 EnterPhase(AutomationPhase.PlayLottery);
                 nextActionAt = DateTime.UtcNow;
-                status = "正在继续抽奖";
+                status = OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryContinuing");
             }
             return;
         }
@@ -234,17 +208,17 @@ public sealed partial class AutoIshgardRestoration
 
         if (ticketsToPlay > 0)
         {
-            var npc = OmenTools.DService.Instance().ObjectTable
+            var npc = DService.Instance().ObjectTable
                 .FirstOrDefault(o => GetBaseID(o.Address) == LOTTERY_NPC_ID && o.IsTargetable);
             if (npc is null)
             {
-                FailAutomation("未找到库啵好运道NPC。");
+                FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryNPCMissing"));
                 return;
             }
 
             if (!SendNPCEventStart(npc.Address))
             {
-                FailAutomation("无法打开库啵好运道NPC界面。");
+                FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryNPCOpenFailed"));
                 return;
             }
 
@@ -253,18 +227,18 @@ public sealed partial class AutoIshgardRestoration
             lotteryScratched = false;
             lotteryTicketCounted = false;
             lotteryScratchAttempts = 0;
-            status = $"继续抽奖，剩余 {ticketsToPlay} 张";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryRemaining"), ticketsToPlay);
             return;
         }
 
         if (ReadInventory(activeItemID).ItemCount > 0)
         {
             EnterPhase(AutomationPhase.MoveToAppraiser);
-            status = $"抽奖完成，返回提交剩余的 {recipe.ItemName}";
+            status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryReturnToSubmission"), recipe.ItemName);
         }
         else
         {
-            BeginNextCraftingCycle("物品提交及库啵好运道抽奖完成");
+            BeginNextCraftingCycle(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SubmissionLotteryComplete"));
         }
     }
 
@@ -275,7 +249,7 @@ public sealed partial class AutoIshgardRestoration
         lotteryScratched = false;
         lotteryTicketCounted = false;
         lotteryScratchAttempts = 0;
-        status = $"准备选择右侧三个格子，剩余 {ticketsToPlay} 张";
+        status = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.LotteryScratchPreparing"), ticketsToPlay);
     }
 
     private static unsafe bool TryReadVoucherCount(out int current, out int limit)
@@ -303,7 +277,7 @@ public sealed partial class AutoIshgardRestoration
             }
 
             var normalized = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
-            var match = VOUCHER_PATTERN.Match(normalized);
+            var match = VoucherPattern.Match(normalized);
             if (match.Success
                 && int.TryParse(match.Groups[1].Value, out var count)
                 && int.TryParse(match.Groups[2].Value, out var parsedLimit)
@@ -330,5 +304,12 @@ public sealed partial class AutoIshgardRestoration
     }
 
     private static string FormatVoucherCount(int count, int limit) =>
-        count >= 0 && limit >= 0 ? $"{count}/{limit}" : "未识别";
+        count >= 0 && limit >= 0 ? $"{count}/{limit}" : OmniLoc.Get("Feature.AutoIshgardRestoration.UI.VoucherUnknown");
+
+    #region 常量
+
+    private const int RIGHT_LOTTERY_EVENT_PARAM = 22;
+    private const uint LOTTERY_NPC_ID = 1031692;
+
+    #endregion
 }

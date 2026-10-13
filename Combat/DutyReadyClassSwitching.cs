@@ -9,7 +9,6 @@ using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
 using OmniToolbox.Host;
 using OmniToolbox.Lifecycle;
-using OmniToolbox.Notifications;
 using OmniToolbox.UI;
 
 namespace OmniToolbox.TreePublic;
@@ -124,7 +123,7 @@ public sealed unsafe class DutyReadyClassSwitching : ModuleBase
             return;
         }
 
-        OmniNotifier.Chat(OmniLoc.Get("Feature.DutyReadyClassSwitching.NoGearset"));
+        DalamudServices.PluginLog.Warning("Duty ready class switching failed: no gearset for class job {ClassJobID}.", classJobID);
     }
 
     private void ClearState()

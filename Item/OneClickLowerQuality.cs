@@ -89,10 +89,10 @@ public sealed unsafe class OneClickLowerQuality(OneClickLowerQualityConfig confi
         taskHelper = new()
         {
             RetryIntervalMS = 100,
-            TimeoutMS = 15_000,
-            TimeoutAction = StopPending,
-            ExceptionAction = StopPending
+            TimeoutMS = 15_000
         };
+        taskHelper.TaskTimeout += _ => StopPending();
+        taskHelper.TaskGetException += _ => StopPending();
         addonEvents = new(DalamudServices.AddonLifecycle);
         addonEvents.Register(AddonEvent.PostSetup, "SelectYesno", OnConfirmation);
         addonEvents.Register(AddonEvent.PreFinalize, "SelectYesno", OnConfirmation);

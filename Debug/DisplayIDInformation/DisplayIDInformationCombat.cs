@@ -165,7 +165,7 @@ internal sealed unsafe class DisplayIDInformationCombat : IDisposable
         }
         catch (Exception ex)
         {
-            DalamudServices.PluginLog.Debug(ex, "Display ID ActionEffect capture failed.");
+            DalamudServices.PluginLog.Warning(ex, "Display ID ActionEffect capture failed.");
         }
 
         actionEffectHook!.Original(sourceID, sourceCharacter, position, effectHeader, effectArray, effectTail);
