@@ -67,7 +67,7 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
 
     protected override bool OnInterruptAutomation()
     {
-        if (!IsEnabled)
+        if (!IsEnabled || !firmamentTravelStartedByModule || !isTeleportBusy())
             return false;
         startPending = false;
         StopProduction(OmniLoc.Get("Feature.AutoIshgardRestoration.Interrupted"));

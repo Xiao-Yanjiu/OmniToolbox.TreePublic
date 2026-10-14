@@ -52,7 +52,7 @@ public sealed unsafe partial class DutyLootPreview : ModuleBase
 
     private FeatureLifetime? runtimeLifetime;
     private LootWindow? window;
-    private OverlayController? overlayController;
+    private NativeOverlayController? overlayController;
     private DutyLootTodoOverlayNode? todoOverlayNode;
     private DutyLootOverlayNode? overlayNode;
     private uint activeDutyID;
@@ -230,6 +230,8 @@ public sealed unsafe partial class DutyLootPreview : ModuleBase
 
         public override OverlayLayer OverlayLayer => OverlayLayer.BehindUserInterface;
 
+        public override bool HideWithNativeUi => false;
+
         public void HideButtonNow()
         {
             todoButton.IsVisible = false;
@@ -344,6 +346,8 @@ public sealed unsafe partial class DutyLootPreview : ModuleBase
         }
 
         public override OverlayLayer OverlayLayer => OverlayLayer.AboveUserInterface;
+
+        public override bool HideWithNativeUi => false;
 
         public void HideButtonsNow()
         {

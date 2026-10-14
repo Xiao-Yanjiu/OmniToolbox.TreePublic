@@ -101,6 +101,18 @@ public sealed unsafe class AutoUseUncollectedItems : ModuleBase
             }
         }
 
+        ImGui.TableNextColumn();
+        if (OmniControls.Checkbox(
+                OmniLoc.Get("Feature.AutoUseUncollectedItems.SecretRecipeBooks"),
+                ref config.UseSecretRecipeBooks))
+            SaveHostConfig?.Invoke();
+
+        ImGui.TableNextColumn();
+        if (OmniControls.Checkbox(
+                OmniLoc.Get("Feature.AutoUseUncollectedItems.FolkloreTomes"),
+                ref config.UseFolkloreTomes))
+            SaveHostConfig?.Invoke();
+
         return false;
     }
 
@@ -144,9 +156,16 @@ public sealed unsafe class AutoUseUncollectedItems : ModuleBase
     private bool CanUseCollectible(InventoryItem slot)
     {
         var itemID = slot.GetBaseItemId();
-        return itemTypes.TryGetValue(itemID, out var type) &&
-               config.EnabledTypes.Contains(type) &&
-               LuminaGetter.TryGetRow<Item>(itemID, out var item) &&
+        if (!LuminaGetter.TryGetRow<Item>(itemID, out var item) || !item.ItemAction.IsValid)
+            return false;
+
+        var enabled = (ItemActionKind)item.ItemAction.Value.Action.RowId switch
+        {
+            ItemActionKind.SecretRecipeBook => config.UseSecretRecipeBooks,
+            ItemActionKind.FolkloreTome => config.UseFolkloreTomes,
+            _ => itemTypes.TryGetValue(itemID, out var type) && config.EnabledTypes.Contains(type)
+        };
+        return enabled &&
                DalamudServices.UnlockState.IsItemUnlockable(item) &&
                !DalamudServices.UnlockState.IsItemUnlocked(item) &&
                ActionManager.Instance()->GetActionStatus(ActionType.Item, slot.GetItemId()) == 0;
@@ -174,6 +193,15 @@ public sealed unsafe class AutoUseUncollectedItems : ModuleBase
     {
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public HashSet<CollectionType> EnabledTypes = [.. SupportedTypes];
+
+        public bool UseSecretRecipeBooks = true;
+        public bool UseFolkloreTomes = true;
+    }
+
+    private enum ItemActionKind : uint
+    {
+        SecretRecipeBook = 2136,
+        FolkloreTome = 4107
     }
 
     private static readonly CollectionType[] SupportedTypes =
