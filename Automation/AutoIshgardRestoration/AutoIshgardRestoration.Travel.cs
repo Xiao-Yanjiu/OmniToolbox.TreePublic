@@ -10,6 +10,7 @@ namespace OmniToolbox.TreePublic;
 public sealed partial class AutoIshgardRestoration
 {
     private bool vnavPathStartedByModule;
+    private bool firmamentTravelStartedByModule;
 
     private DateTime? movableSince;
 
@@ -17,11 +18,19 @@ public sealed partial class AutoIshgardRestoration
 
     private void DriveWaitForFirmament()
     {
-        if (DService.Instance().ClientState.TerritoryType == FIRMAMENT_TERRITORY_ID)
+        var teleportBusy = firmamentTravelStartedByModule && isTeleportBusy();
+        if (!teleportBusy && DService.Instance().ClientState.TerritoryType == FIRMAMENT_TERRITORY_ID)
         {
+            firmamentTravelStartedByModule = false;
             movableSince = null;
             EnterPhase(AutomationPhase.WaitForPlayerMovable);
             status = OmniLoc.Get("Feature.AutoIshgardRestoration.EnteredFirmament");
+            return;
+        }
+
+        if (!teleportBusy)
+        {
+            FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.TeleportCommandFailed"));
             return;
         }
 
@@ -129,11 +138,20 @@ public sealed partial class AutoIshgardRestoration
         vnavPathStartedByModule = false;
     }
 
+    private void StopOwnedTeleport()
+    {
+        if (!firmamentTravelStartedByModule)
+            return;
+
+        firmamentTravelStartedByModule = false;
+        cancelTeleport();
+    }
+
     #region 常量
 
     private const uint FIRMAMENT_TERRITORY_ID = 886;
 
-    private const string FIRMAMENT_TELEPORT_COMMAND = "/omni bts 无名众人广场";
+    private const string FIRMAMENT_TELEPORT_DESTINATION = "无名众人广场";
 
     #endregion
 }

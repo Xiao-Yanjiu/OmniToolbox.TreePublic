@@ -15,7 +15,7 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
         Title = OmniLoc.Get("AutoIshgardRestorationTitle"),
         Description = OmniLoc.Get("AutoIshgardRestorationDescription"),
         Category = ModuleCategory.Automation,
-        Author = "Angelways",
+        Author = "Angelways，YouShu",
         SupportUrls = ["https://github.com/Angelways"],
         Commands =
         [
@@ -27,12 +27,19 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
 
     private readonly Config config;
     private readonly Action saveConfig;
+    private readonly Func<string, bool> tryTeleport;
+    private readonly Func<bool> isTeleportBusy;
+    private readonly Action cancelTeleport;
     private bool startPending;
 
-    public AutoIshgardRestoration(Config config, Action saveConfig)
+    public AutoIshgardRestoration(Config config, Action saveConfig, Func<string, bool> tryTeleport,
+        Func<bool> isTeleportBusy, Action cancelTeleport)
     {
         this.config = config;
         this.saveConfig = saveConfig;
+        this.tryTeleport = tryTeleport;
+        this.isTeleportBusy = isTeleportBusy;
+        this.cancelTeleport = cancelTeleport;
     }
 
     protected override void OnEnable()

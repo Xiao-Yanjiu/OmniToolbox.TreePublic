@@ -226,29 +226,27 @@ public sealed partial class AutoIshgardRestoration
                     if (jobID is >= 8 and <= 15)
                         preview = selected is { } value && value.JobID == jobID
                             ? FormatRecipe(value) : OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SelectRecipe");
-                    ImGui.SetNextItemWidth(MathF.Max(1f, ImGui.GetContentRegionAvail().X));
-                    using (var combo = ImRaii.Combo("##ishgardRecipe", preview))
+                    if (OmniControls.BeginCombo("##ishgardRecipe", preview,
+                            MathF.Max(1f, ImGui.GetContentRegionAvail().X)))
                     {
-                        if (combo)
+                        foreach (var recipe in Recipes)
                         {
-                            foreach (var recipe in Recipes)
-                            {
-                                if (recipe.JobID != jobID)
-                                    continue;
+                            if (recipe.JobID != jobID)
+                                continue;
 
-                                var available = recipe.Level <= level;
-                                using var disabled = ImRaii.Disabled(!available);
-                                if (OmniControls.RoundedSelectable(
-                                        FormatRecipe(recipe),
-                                        config.SelectedRecipeID == recipe.RecipeID,
-                                        size: new Vector2(0f, OmniTheme.SmallButtonSize().Y)) && available)
-                                {
-                                    config.SelectedRecipeID = recipe.RecipeID;
-                                    selected = recipe;
-                                    saveConfig();
-                                }
+                            var available = recipe.Level <= level;
+                            using var disabled = ImRaii.Disabled(!available);
+                            if (OmniControls.RoundedSelectable(
+                                    FormatRecipe(recipe),
+                                    config.SelectedRecipeID == recipe.RecipeID,
+                                    size: new Vector2(0f, OmniTheme.SmallButtonSize().Y)) && available)
+                            {
+                                config.SelectedRecipeID = recipe.RecipeID;
+                                selected = recipe;
+                                saveConfig();
                             }
                         }
+                        ImGui.EndCombo();
                     }
 
                     ImGui.TableNextColumn();
@@ -353,49 +351,48 @@ public sealed partial class AutoIshgardRestoration
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.PurchaseItem"));
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(MathF.Max(1f, ImGui.GetContentRegionAvail().X));
         var popupHeight = MathF.Max(1f, MathF.Min(OmniTheme.Scale(360f), ImGui.GetMainViewport().WorkSize.Y * 0.8f));
         ImGui.SetNextWindowSizeConstraints(new Vector2(0f, popupHeight), new Vector2(float.MaxValue, popupHeight));
-        using (var combo = ImRaii.Combo("##ishgardPurchaseItem", selected is null ? OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SelectPurchaseItem") : string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ProductPrice"), selected.Name, selected.Price)))
+        var preview = selected is null ? OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SelectPurchaseItem")
+            : string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ProductPrice"), selected.Name, selected.Price);
+        if (OmniControls.BeginCombo("##ishgardPurchaseItem", preview, MathF.Max(1f, ImGui.GetContentRegionAvail().X)))
         {
-            if (combo)
+            ImGui.Dummy(new Vector2(0f, OmniTheme.Scale(4f)));
+            if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+            var searchChanged = OmniControls.InputTextWithHint(
+                "##scripProductSearch", OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SearchItem"), ref scripProductSearch, 128,
+                ImGui.GetContentRegionAvail().X);
+            ImGui.Separator();
+            var productSelected = false;
+            using (var results = ImRaii.Child("##scripProductResults",
+                       new Vector2(0f, MathF.Max(1f, ImGui.GetContentRegionAvail().Y))))
             {
-                ImGui.Dummy(new Vector2(0f, OmniTheme.Scale(4f)));
-                if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
-                var searchChanged = OmniControls.InputTextWithHint(
-                    "##scripProductSearch", OmniLoc.Get("Feature.AutoIshgardRestoration.UI.SearchItem"), ref scripProductSearch, 128,
-                    ImGui.GetContentRegionAvail().X);
-                ImGui.Separator();
-                var productSelected = false;
-                using (var results = ImRaii.Child("##scripProductResults",
-                           new Vector2(0f, MathF.Max(1f, ImGui.GetContentRegionAvail().Y))))
+                if (results)
                 {
-                    if (results)
+                    if (searchChanged) ImGui.SetScrollY(0f);
+                    var hasMatches = false;
+                    var search = scripProductSearch.Trim();
+                    ImGui.Dummy(new Vector2(0f, OmniTheme.Scale(4f)));
+                    foreach (var product in scripProducts)
                     {
-                        if (searchChanged) ImGui.SetScrollY(0f);
-                        var hasMatches = false;
-                        var search = scripProductSearch.Trim();
-                        ImGui.Dummy(new Vector2(0f, OmniTheme.Scale(4f)));
-                        foreach (var product in scripProducts)
+                        if (!product.Name.Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+                        hasMatches = true;
+                        if (OmniControls.RoundedSelectable(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ProductPrice"), product.Name, product.Price) + $"##{product.ShopID}-{product.ItemID}",
+                                selected == product, size: new Vector2(0f, OmniTheme.SmallButtonSize().Y)))
                         {
-                            if (!product.Name.Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
-                            hasMatches = true;
-                            if (OmniControls.RoundedSelectable(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ProductPrice"), product.Name, product.Price) + $"##{product.ShopID}-{product.ItemID}",
-                                    selected == product, size: new Vector2(0f, OmniTheme.SmallButtonSize().Y)))
-                            {
-                                config.ScripShopID = product.ShopID;
-                                config.ScripItemID = product.ItemID;
-                                selected = product;
-                                config.ScripQuantity = Math.Min(Math.Max(1, config.ScripQuantity), Math.Max(1, GetConfiguredScripLimit(product)));
-                                saveConfig();
-                                productSelected = true;
-                            }
+                            config.ScripShopID = product.ShopID;
+                            config.ScripItemID = product.ItemID;
+                            selected = product;
+                            config.ScripQuantity = Math.Min(Math.Max(1, config.ScripQuantity), Math.Max(1, GetConfiguredScripLimit(product)));
+                            saveConfig();
+                            productSelected = true;
                         }
-                        if (!hasMatches) ImGui.TextDisabled(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.NoMatchingItems"));
                     }
+                    if (!hasMatches) ImGui.TextDisabled(OmniLoc.Get("Feature.AutoIshgardRestoration.UI.NoMatchingItems"));
                 }
-                if (productSelected) ImGui.CloseCurrentPopup();
             }
+            if (productSelected) ImGui.CloseCurrentPopup();
+            ImGui.EndCombo();
         }
 
         ImGui.TableNextColumn();

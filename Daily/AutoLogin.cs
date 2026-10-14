@@ -71,6 +71,8 @@ public sealed unsafe class AutoLogin(
         addonEvents = new(DalamudServices.AddonLifecycle);
         addonEvents.Register(AddonEvent.PostSetup, "LobbyDKT", OnLobbyTravel);
         addonEvents.Register(AddonEvent.PostSetup, "_TitleMenu", OnTitleMenu);
+        if (GameState.IsLoggedIn)
+            GetCurrentAccountTargets();
         if (AddonHelper.TryGetByName("_TitleMenu", out var titleMenu) &&
             titleMenu->IsAddonAndNodesReady())
             OnTitleMenu(AddonEvent.PostSetup, null);
@@ -252,6 +254,41 @@ public sealed unsafe class AutoLogin(
         manualTarget = null;
         crossDataCenterTravelInProgress = false;
         suspendedUntilLogin = false;
+        GetCurrentAccountTargets();
+    }
+
+    public AutoLoginTarget[] GetCurrentAccountTargets()
+    {
+        var player = DService.Instance().ObjectTable.LocalPlayer;
+        if (!GameState.IsLoggedIn || player is null || player.AccountID == 0)
+            return [];
+
+        var accountID = player.AccountID;
+        var contentID = DService.Instance().PlayerState.ContentId;
+        var agent = AgentLobby.Instance();
+        var hasCurrentCharacter = agent != null && contentID != 0 &&
+            agent->LobbyData.LobbyUIClient.CurrentDataCenterCharacters.Any(entry => entry.ContentId == contentID);
+        var changed = false;
+        foreach (var target in config.Targets)
+        {
+            if (target.AccountID != 0)
+                continue;
+
+            var isCurrentCharacter = target.WorldID == DService.Instance().PlayerState.HomeWorld.RowId &&
+                target.CharacterName.Equals(player.Name.ToString(), StringComparison.Ordinal);
+            if (!isCurrentCharacter && (!hasCurrentCharacter ||
+                !agent->LobbyData.LobbyUIClient.CurrentDataCenterCharacters.Any(entry =>
+                    entry.ContentId != 0 && entry.HomeWorldId == target.WorldID &&
+                    entry.NameString.Equals(target.CharacterName, StringComparison.Ordinal))))
+                continue;
+
+            target.AccountID = accountID;
+            changed = true;
+        }
+
+        if (changed)
+            saveConfig();
+        return [.. config.Targets.Where(target => target.AccountID == accountID)];
     }
 
     public bool TryRelog(AutoLoginTarget target)
@@ -261,7 +298,7 @@ public sealed unsafe class AutoLogin(
             !GameState.IsLoggedIn ||
             GameState.ContentFinderCondition != 0 ||
             tasks.IsBusy ||
-            !config.Targets.Any(candidate =>
+            !GetCurrentAccountTargets().Any(candidate =>
                 candidate.WorldID == target.WorldID &&
                 candidate.CharacterName.Equals(target.CharacterName, StringComparison.Ordinal)))
         {
@@ -273,6 +310,14 @@ public sealed unsafe class AutoLogin(
             current.Name.ToString().Equals(target.CharacterName, StringComparison.Ordinal) &&
             DService.Instance().PlayerState.CurrentWorld.RowId == target.WorldID)
         {
+            return false;
+        }
+
+        if (GameState.IsCN &&
+            LuminaWrapper.GetWorldDC(target.WorldID) != LuminaWrapper.GetWorldDC(GameState.CurrentWorld) &&
+            !IsDataCenterLoginAvailable())
+        {
+            NotifyHelper.Instance().NotificationWarning("切换大区需要启用 DCTravelerX，当前登录接口未就绪，已取消切号。");
             return false;
         }
 
@@ -324,6 +369,7 @@ public sealed unsafe class AutoLogin(
         }
 
         uint dataCenterID = 0;
+        var requiresDataCenterLogin = target is not null && GameState.IsCN;
         if (target is not null)
         {
             if (!Sheets.Worlds.TryGetValue(target.WorldID, out var targetWorld))
@@ -370,6 +416,12 @@ public sealed unsafe class AutoLogin(
                     }
                 }
 
+                if (requiresDataCenterLogin && loadedDataCenterID != 0 && loadedDataCenterID == dataCenterID)
+                {
+                    requiresDataCenterLogin = false;
+                    return true;
+                }
+
                 if (AddonHelper.TryGetByName("_CharaSelectListMenu", out var characterSelect) &&
                     characterSelect->IsAddonAndNodesReady())
                 {
@@ -411,11 +463,17 @@ public sealed unsafe class AutoLogin(
             tasks.Enqueue(
                 () =>
                 {
-                    if (IsLobbyTravelReady())
+                    if (!requiresDataCenterLogin || IsLobbyTravelReady())
                         return true;
 
                     if (dataCenterLogin is null)
                     {
+                        if (!IsDataCenterLoginAvailable())
+                        {
+                            NotifyHelper.Instance().NotificationWarning("DCTravelerX 登录接口未就绪，已停止自动登录。");
+                            SuspendUntilNextLogin();
+                            return true;
+                        }
                         dataCenterLogin = selectDataCenterAndLogin.InvokeFunc(LuminaWrapper.GetDataCenterName(dataCenterID));
                     }
                     if (!dataCenterLogin.IsCompleted)
@@ -462,7 +520,7 @@ public sealed unsafe class AutoLogin(
                     return true;
                 }
 
-                if (target is not null && GameState.IsCN)
+                if (requiresDataCenterLogin)
                 {
                     return true;
                 }
@@ -615,6 +673,9 @@ public sealed unsafe class AutoLogin(
         return worlds.Count > 0 ? LuminaWrapper.GetWorldDC(worlds[0].Id) : 0;
     }
 
+    private static bool IsDataCenterLoginAvailable() =>
+        DalamudServices.PluginInterface.GetIpcSubscriber<string, Task<bool>>("DCTravelerX.SelectDCAndLogin").HasFunction;
+
     private bool IsLobbyTravelReady()
     {
         if (suspendedUntilLogin)
@@ -636,9 +697,14 @@ public sealed unsafe class AutoLogin(
         }
 
         var target = new AutoLoginTarget(
-            DService.Instance().PlayerState.CurrentWorld.RowId,
-            localPlayer.Name.ToString());
-        if (config.Targets.Contains(target))
+            DService.Instance().PlayerState.HomeWorld.RowId,
+            localPlayer.Name.ToString())
+        {
+            AccountID = localPlayer.AccountID
+        };
+        GetCurrentAccountTargets();
+        if (config.Targets.Any(candidate => candidate.WorldID == target.WorldID &&
+            candidate.CharacterName.Equals(target.CharacterName, StringComparison.Ordinal)))
         {
             return false;
         }
@@ -688,4 +754,5 @@ public sealed class AutoLoginConfig
 public sealed record AutoLoginTarget(uint WorldID, string CharacterName)
 {
     public bool Enabled { get; set; } = true;
+    public ulong AccountID { get; set; }
 }

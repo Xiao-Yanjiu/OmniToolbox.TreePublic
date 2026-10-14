@@ -89,7 +89,8 @@ public sealed partial class AutoIshgardRestoration
 
         if (DService.Instance().ClientState.TerritoryType != FIRMAMENT_TERRITORY_ID)
         {
-            if (!DService.Instance().Command.ProcessCommand(FIRMAMENT_TELEPORT_COMMAND))
+            firmamentTravelStartedByModule = tryTeleport(FIRMAMENT_TELEPORT_DESTINATION);
+            if (!firmamentTravelStartedByModule)
             {
                 FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.TeleportCommandFailed"));
                 return;
@@ -106,6 +107,7 @@ public sealed partial class AutoIshgardRestoration
 
     private void StopProduction(string reason)
     {
+        StopOwnedTeleport();
         CleanupScripPurchase();
         StopOwnedArtisan();
         StopOwnedVnavPath();
@@ -322,6 +324,7 @@ public sealed partial class AutoIshgardRestoration
 
     private void FailAutomation(string message)
     {
+        StopOwnedTeleport();
         CleanupScripPurchase();
         StopOwnedArtisan();
         StopOwnedVnavPath();
