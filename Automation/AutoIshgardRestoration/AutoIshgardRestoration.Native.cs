@@ -224,9 +224,18 @@ public sealed partial class AutoIshgardRestoration
 
     private static InventorySnapshot ReadInventory(uint itemID)
     {
+        var rewards = default(ScripRewards);
+        foreach (var recipe in Recipes)
+        {
+            if (recipe.ItemID != itemID) continue;
+            rewards = recipe.Rewards;
+            break;
+        }
+
         var freeSlots = 0;
         var totalSlots = 0;
         var itemCount = 0;
+        var pendingScrips = 0;
         foreach (var type in MainInventoryTypes)
         {
             var items = DService.Instance().GameInventory.GetInventoryItems(type);
@@ -240,14 +249,16 @@ public sealed partial class AutoIshgardRestoration
                 else if (item.BaseItemId == itemID)
                 {
                     itemCount += item.Quantity;
+                    if (item.IsCollectable)
+                        pendingScrips += rewards.GetScrips(item.SpiritbondOrCollectability) * item.Quantity;
                 }
             }
         }
 
-        return new InventorySnapshot(freeSlots, totalSlots, itemCount);
+        return new InventorySnapshot(freeSlots, totalSlots, itemCount, pendingScrips);
     }
 
-    private readonly record struct InventorySnapshot(int FreeSlots, int TotalSlots, int ItemCount);
+    private readonly record struct InventorySnapshot(int FreeSlots, int TotalSlots, int ItemCount, int PendingScrips);
 
     private static readonly GameInventoryType[] MainInventoryTypes =
     [

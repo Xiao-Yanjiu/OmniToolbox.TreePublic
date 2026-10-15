@@ -207,7 +207,7 @@ public sealed partial class AutoIshgardRestoration
     private void DriveWaitArtisanStart(RecipeOption recipe)
     {
         var snapshot = ReadInventory(activeItemID);
-        if (ShouldStop(snapshot, out var reason))
+        if (ShouldStop(snapshot, ReadSkybuildersScrips(), out var reason))
         {
             RequestArtisanStop();
             EnterPhase(AutomationPhase.WaitArtisanStop);
@@ -231,7 +231,7 @@ public sealed partial class AutoIshgardRestoration
     private void DriveCrafting(RecipeOption recipe)
     {
         var snapshot = ReadInventory(activeItemID);
-        if (ShouldStop(snapshot, out var reason))
+        if (ShouldStop(snapshot, ReadSkybuildersScrips(), out var reason))
         {
             RequestArtisanStop();
             EnterPhase(AutomationPhase.WaitArtisanStop);
@@ -335,11 +335,19 @@ public sealed partial class AutoIshgardRestoration
         status = OmniLoc.Get("Feature.AutoIshgardRestoration.AutomationStopped");
     }
 
-    private bool ShouldStop(InventorySnapshot snapshot, out string reason)
+    private bool ShouldStop(InventorySnapshot snapshot, uint balance, out string reason)
     {
         if (snapshot.FreeSlots <= 5)
         {
             reason = string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.StoppedForFreeSlots"), snapshot.FreeSlots);
+            return true;
+        }
+
+        var threshold = Math.Clamp(config.AutoBuyScrips ? config.ScripThreshold : config.ScripStopThreshold, 1, 10000);
+        if (snapshot.PendingScrips > 0 && (long)balance + snapshot.PendingScrips >= threshold)
+        {
+            reason = string.Format(CultureInfo.InvariantCulture,
+                OmniLoc.Get("Feature.AutoIshgardRestoration.StoppedForScrips"), balance, snapshot.PendingScrips, threshold);
             return true;
         }
 

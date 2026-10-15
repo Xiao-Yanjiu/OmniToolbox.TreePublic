@@ -21,7 +21,9 @@ public sealed partial class AutoIshgardRestoration
 
     private bool windowSizePending;
 
-    private Vector2 expandedWindowSize;
+    private float lastWindowScale;
+
+    private Vector2 lastViewportSize;
 
     public override bool DrawSettings()
     {
@@ -60,19 +62,25 @@ public sealed partial class AutoIshgardRestoration
                              ImGui.GetStyle().ItemSpacing.Y;
         }
 
+        var viewportSize = ImGui.GetMainViewport().WorkSize;
+        var applyWindowSize = !windowExpanded || windowCollapsed || windowSizePending ||
+                              MathF.Abs(lastWindowScale - OmniTheme.ScaleValue) > 0.001f ||
+                              lastViewportSize != viewportSize;
         var targetSize = windowExpanded
-            ? OmniTheme.Scale(expandedWindowSize == Vector2.Zero ? new Vector2(720f, 760f) : expandedWindowSize)
+            ? OmniTheme.Scale(config.ExpandedWindowSize)
             : compactSize;
         if (windowCollapsed)
             targetSize = OmniTheme.CollapsedWindowSize(windowExpanded ? targetSize.X : compactWidth);
         if (windowExpanded && !windowCollapsed)
             ImGui.SetNextWindowSizeConstraints(OmniTheme.ClampWindowSize(OmniTheme.Scale(new Vector2(320f, 240f))),
-                ImGui.GetMainViewport().WorkSize);
-        if (!windowExpanded || windowCollapsed || windowSizePending)
+                viewportSize);
+        if (applyWindowSize)
         {
             ImGui.SetNextWindowSize(OmniTheme.ClampWindowSize(targetSize), ImGuiCond.Always);
             windowSizePending = false;
         }
+        lastWindowScale = OmniTheme.ScaleValue;
+        lastViewportSize = viewportSize;
         ImGui.SetNextWindowCollapsed(false, ImGuiCond.Always);
         var flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
                     ImGuiWindowFlags.NoBackground;
@@ -86,8 +94,17 @@ public sealed partial class AutoIshgardRestoration
 
         try
         {
-            if (windowExpanded && !windowCollapsed)
-                expandedWindowSize = OmniTheme.Unscale(OmniTheme.PreserveWindowSize(ImGui.GetWindowSize(), targetSize));
+            if (windowExpanded && !windowCollapsed && !applyWindowSize && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                var actualSize = OmniTheme.PreserveWindowSize(ImGui.GetWindowSize(), targetSize);
+                var size = OmniTheme.Unscale(actualSize);
+                if (float.IsFinite(size.X) && float.IsFinite(size.Y) && size.X > 0f && size.Y > 0f &&
+                    (MathF.Abs(actualSize.X - targetSize.X) > 1f || MathF.Abs(actualSize.Y - targetSize.Y) > 1f))
+                {
+                    config.ExpandedWindowSize = size;
+                    saveConfig();
+                }
+            }
             DrawWindowContents(ImGui.GetWindowPos(), ImGui.GetWindowSize(), buttonSize);
         }
         finally
@@ -317,14 +334,11 @@ public sealed partial class AutoIshgardRestoration
         }
 
         ImGui.Separator();
-        ImGui.TextUnformatted(string.Format(CultureInfo.InvariantCulture,
-            OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ScripBalance"), ReadSkybuildersScrips()));
-        if (selected is { } current)
-        {
-            var snapshot = ReadInventory(current.ItemID);
-            ImGui.TextUnformatted(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.FreeSlots"), snapshot.FreeSlots, snapshot.TotalSlots));
-            ImGui.TextWrapped(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ItemCount"), current.ItemName, snapshot.ItemCount));
-        }
+        var balance = ReadSkybuildersScrips();
+        var pendingScrips = selected is { } current ? ReadInventory(current.ItemID).PendingScrips : 0;
+        ImGui.TextWrapped(string.Format(CultureInfo.InvariantCulture,
+            OmniLoc.Get("Feature.AutoIshgardRestoration.UI.ScripBalance"), balance,
+            Math.Min(10000L, balance + (long)pendingScrips)));
 
         UpdateVoucherCount(DateTime.UtcNow);
         ImGui.TextUnformatted(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.VoucherCount"), FormatVoucherCount(voucherCount, voucherLimit)));

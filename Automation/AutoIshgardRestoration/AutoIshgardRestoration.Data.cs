@@ -38,7 +38,20 @@ public sealed partial class AutoIshgardRestoration
         var jobID = row.CraftType.RowId + 8;
         if (item.RowId == 0 || level == 0 || jobID is < 8 or > 15)
             throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.RecipeInvalid"), row.RowId));
-        return new RecipeOption(row.RowId, item.RowId, jobID, level, row.IsExpert, item.Name.ExtractText());
+        foreach (var supply in LuminaGetter.Get<HWDCrafterSupply>())
+        {
+            foreach (var entry in supply.HWDCrafterSupplyParams)
+            {
+                if (entry.ItemTradeIn.RowId != item.RowId) continue;
+                var rewards = new ScripRewards(
+                    entry.BaseCollectableRating, entry.BaseCollectableReward.Value.ScriptRewardAmount,
+                    entry.MidCollectableRating, entry.MidCollectableReward.Value.ScriptRewardAmount,
+                    entry.HighCollectableRating, entry.HighCollectableReward.Value.ScriptRewardAmount);
+                return new RecipeOption(row.RowId, item.RowId, jobID, level, row.IsExpert, item.Name.ExtractText(), rewards);
+            }
+        }
+
+        throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture, OmniLoc.Get("Feature.AutoIshgardRestoration.UI.RecipeInvalid"), row.RowId));
     }
 
     private void EnsureScripCatalog()
@@ -110,7 +123,21 @@ public sealed partial class AutoIshgardRestoration
         uint JobID,
         int Level,
         bool IsExpert,
-        string ItemName);
+        string ItemName,
+        ScripRewards Rewards);
+
+    private readonly record struct ScripRewards(
+        ushort BaseRating, ushort BaseScrips,
+        ushort MidRating, ushort MidScrips,
+        ushort HighRating, ushort HighScrips)
+    {
+        public int GetScrips(uint collectability)
+        {
+            if (collectability >= HighRating) return HighScrips;
+            if (collectability >= MidRating) return MidScrips;
+            return collectability >= BaseRating ? BaseScrips : 0;
+        }
+    }
 
     private sealed record ScripProduct(uint ShopID, uint ItemID, string Name, int Price, int StackSize, bool Unique);
 

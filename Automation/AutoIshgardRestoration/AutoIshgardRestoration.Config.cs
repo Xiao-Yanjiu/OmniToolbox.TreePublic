@@ -1,3 +1,4 @@
+using System.Numerics;
 using Newtonsoft.Json;
 
 namespace OmniToolbox.TreePublic;
@@ -15,5 +16,6 @@ public sealed partial class AutoIshgardRestoration
         public uint ScripShopID;
         public uint ScripItemID;
         public int ScripQuantity = 1;
+        public Vector2 ExpandedWindowSize = new(720f, 480f);
     }
 }

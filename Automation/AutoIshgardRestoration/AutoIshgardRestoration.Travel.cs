@@ -18,17 +18,16 @@ public sealed partial class AutoIshgardRestoration
 
     private void DriveWaitForFirmament()
     {
-        var teleportBusy = firmamentTravelStartedByModule && isTeleportBusy();
-        if (!teleportBusy && DService.Instance().ClientState.TerritoryType == FIRMAMENT_TERRITORY_ID)
+        if (DService.Instance().ClientState.TerritoryType == FIRMAMENT_TERRITORY_ID)
         {
-            firmamentTravelStartedByModule = false;
+            StopOwnedTeleport();
             movableSince = null;
             EnterPhase(AutomationPhase.WaitForPlayerMovable);
             status = OmniLoc.Get("Feature.AutoIshgardRestoration.EnteredFirmament");
             return;
         }
 
-        if (!teleportBusy)
+        if (!firmamentTravelStartedByModule || !isTeleportBusy())
         {
             FailAutomation(OmniLoc.Get("Feature.AutoIshgardRestoration.TeleportCommandFailed"));
             return;

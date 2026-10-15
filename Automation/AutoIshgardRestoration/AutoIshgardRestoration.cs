@@ -95,6 +95,8 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
         config.ScripShopID = defaults.ScripShopID;
         config.ScripItemID = defaults.ScripItemID;
         config.ScripQuantity = defaults.ScripQuantity;
+        config.ExpandedWindowSize = defaults.ExpandedWindowSize;
+        windowSizePending = true;
         saveConfig();
         return true;
     }

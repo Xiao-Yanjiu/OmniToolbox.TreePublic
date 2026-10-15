@@ -41,7 +41,7 @@ public sealed partial class AutoIshgardRestoration
         if (TryBeginAutoScripPurchase()) return;
 
         var snapshot = ReadInventory(recipe.ItemID);
-        if (ShouldStop(snapshot, out var stopReason))
+        if (ShouldStop(snapshot, ReadSkybuildersScrips(), out var stopReason))
         {
             BeginSubmission(stopReason);
             return;
