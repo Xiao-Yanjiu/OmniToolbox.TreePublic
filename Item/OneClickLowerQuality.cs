@@ -1,8 +1,5 @@
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
-using Dalamud.Game.Gui.ContextMenu;
-using Dalamud.Game.Text;
-using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -76,6 +73,7 @@ public sealed unsafe class OneClickLowerQuality(OneClickLowerQualityConfig confi
     private readonly Queue<InventorySlot> pendingSlots = new();
     private TaskHelper? taskHelper;
     private AddonEventRegistry? addonEvents;
+    private LowerQualityMenuEntry? menuEntry;
     private InventorySlot currentSlot;
     private uint ownerAddonID;
     private ushort confirmationAddonID;
@@ -96,12 +94,15 @@ public sealed unsafe class OneClickLowerQuality(OneClickLowerQualityConfig confi
         addonEvents = new(DalamudServices.AddonLifecycle);
         addonEvents.Register(AddonEvent.PostSetup, "SelectYesno", OnConfirmation);
         addonEvents.Register(AddonEvent.PreFinalize, "SelectYesno", OnConfirmation);
-        DService.Instance().ContextMenu.OnMenuOpened += OnMenuOpened;
+        menuEntry = new(this);
+        ContextMenuManager.Instance().Reg(menuEntry);
     }
 
     protected override void OnDisable()
     {
-        DService.Instance().ContextMenu.OnMenuOpened -= OnMenuOpened;
+        if (menuEntry != null)
+            ContextMenuManager.Instance().Unreg(menuEntry);
+        menuEntry = null;
         addonEvents?.Dispose();
         addonEvents = null;
         awaitingWindow = false;
@@ -125,40 +126,6 @@ public sealed unsafe class OneClickLowerQuality(OneClickLowerQualityConfig confi
     }
 
     public override bool DrawSettings() => OneClickLowerQualityPanel.Draw(config);
-
-    private void OnMenuOpened(IMenuOpenedArgs args)
-    {
-        if (args.Target is not MenuTargetInventory targetInventory ||
-            !targetInventory.TargetItem.HasValue)
-        {
-            return;
-        }
-
-        var targetItem = targetInventory.TargetItem.Value;
-        if (!targetItem.IsHq && !targetItem.IsCollectable)
-        {
-            return;
-        }
-
-        var itemID = ItemUtil.GetBaseId(targetItem.ItemId).ItemId;
-        if (itemID == 0)
-        {
-            return;
-        }
-
-        args.AddMenuItem(new MenuItem
-        {
-            Name = new SeStringBuilder()
-                .AddUiForeground(10)
-                .Append(((char)SeIconChar.BoxedLetterT).ToString())
-                .AddUiForegroundOff()
-                .Append($" {OmniLoc.Get("Feature.OneClickLowerQuality.Menu")}")
-                .Build(),
-            OnClicked = _ => Begin(itemID, (InventoryType)targetItem.ContainerType),
-            PrefixChar = 'O',
-            PrefixColor = 10
-        });
-    }
 
     private void Begin(uint itemID, InventoryType sourceContainer)
     {
@@ -378,6 +345,31 @@ public sealed unsafe class OneClickLowerQuality(OneClickLowerQualityConfig confi
 
     private static bool NeedsLowerQuality(InventoryItem* slot) =>
         slot->IsHighQuality() || slot->IsCollectable();
+
+    private sealed class LowerQualityMenuEntry(OneClickLowerQuality module) : ContextMenuEntry
+    {
+        public override string Identifier => nameof(OneClickLowerQuality);
+
+        public override ContextMenuItem? Create(ContextMenuOpenedArgs args)
+        {
+            if (args.InventoryAgentContext == null ||
+                args.TargetInventoryItem is not { } targetItem ||
+                args.TargetInventoryType is not { } container ||
+                !targetItem.IsHighQuality() && !targetItem.IsCollectable())
+                return null;
+
+            var itemID = args.TargetItemID;
+            if (itemID == 0)
+                return null;
+
+            return new()
+            {
+                Name = OmniLoc.Get("Feature.OneClickLowerQuality.Menu"),
+                Prefix = OmniContextMenu.Prefix,
+                OnClicked = _ => module.Begin(itemID, container)
+            };
+        }
+    }
 
     private readonly record struct InventorySlot(InventoryType Container, ushort Slot, uint ItemID);
 }

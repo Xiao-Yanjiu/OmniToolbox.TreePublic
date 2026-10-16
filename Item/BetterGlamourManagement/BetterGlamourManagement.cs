@@ -10,6 +10,7 @@ using OmenTools.Extensions;
 using OmenTools.Interop.Game.Helpers;
 using OmenTools.OmenService;
 using OmenTools.Threading.TaskHelper;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -38,7 +39,7 @@ public sealed unsafe partial class BetterGlamourManagement(
         [
             new ModuleCommand(
                 "Feature.BetterGlamourManagement.CommandDescription",
-                "/omni 幻化管理")
+                OmniCommandCatalog.Format("glamour"))
         ]
     };
 

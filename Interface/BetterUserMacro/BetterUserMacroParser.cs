@@ -1,4 +1,5 @@
 using System.Text;
+using OmniToolbox.Commands;
 
 namespace OmniToolbox.TreePublic;
 
@@ -37,13 +38,17 @@ internal static class BetterUserMacroParser
         }
 
         line = Trim(line);
-        if (!ConsumeCommand(ref line, "宏图标"u8) &&
-            !ConsumeCommand(ref line, "宏圖標"u8))
+        var commandLength = 0;
+        while (commandLength < line.Length && !IsWhitespace(line[commandLength]))
+        {
+            commandLength++;
+        }
+        if (OmniCommandCatalog.Find(Encoding.UTF8.GetString(line[..commandLength]))?.Name != "macroicon")
         {
             return false;
         }
 
-        line = Trim(line);
+        line = Trim(line[commandLength..]);
         if (line.IsEmpty)
         {
             return false;

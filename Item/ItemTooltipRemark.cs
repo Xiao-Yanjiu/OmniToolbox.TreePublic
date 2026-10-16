@@ -1,7 +1,4 @@
 using System.Linq;
-using Dalamud.Game.Gui.ContextMenu;
-using Dalamud.Game.Text;
-using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Utility;
 using OmenTools;
 using OmenTools.Interop.Game.Lumina;
@@ -28,6 +25,7 @@ public sealed class ItemTooltipRemark : ModuleBase
 
     private readonly ItemTooltipRemarkConfig config;
     private readonly TooltipManager.ItemTooltipUpdateDelegate tooltipHandler;
+    private RemarkMenuEntry? menuEntry;
     private KeyValuePair<uint, string>[] orderedRemarks = [];
     private int editingItemID;
     private string editingText = string.Empty;
@@ -47,13 +45,16 @@ public sealed class ItemTooltipRemark : ModuleBase
         var manager = TooltipManager.Instance();
         manager.RegItem(tooltipHandler);
         tooltipManager = manager;
-        DService.Instance().ContextMenu.OnMenuOpened += OnMenuOpened;
+        menuEntry = new(this);
+        ContextMenuManager.Instance().Reg(menuEntry);
         manager.TriggerItemDetailUpdate();
     }
 
     protected override void OnDisable()
     {
-        DService.Instance().ContextMenu.OnMenuOpened -= OnMenuOpened;
+        if (menuEntry != null)
+            ContextMenuManager.Instance().Unreg(menuEntry);
+        menuEntry = null;
         var manager = tooltipManager!;
         try
         {
@@ -313,35 +314,6 @@ public sealed class ItemTooltipRemark : ModuleBase
         return false;
     }
 
-    private void OnMenuOpened(IMenuOpenedArgs args)
-    {
-        var itemID = args.Target is MenuTargetInventory target && target.TargetItem.HasValue
-            ? NormalizeItemID(target.TargetItem.Value.ItemId)
-            : 0;
-        if (itemID == 0)
-        {
-            itemID = NormalizeItemID(DService.Instance().GameGUI.HoveredItem);
-        }
-
-        if (itemID == 0)
-        {
-            return;
-        }
-
-        args.AddMenuItem(new MenuItem
-        {
-            Name = new SeStringBuilder()
-                .AddUiForeground(10)
-                .Append(((char)SeIconChar.BoxedLetterT).ToString())
-                .AddUiForegroundOff()
-                .Append($" {OmniLoc.Get("Feature.ItemTooltipRemark.Menu")}")
-                .Build(),
-            OnClicked = _ => OpenEditor(itemID),
-            PrefixChar = 'O',
-            PrefixColor = 10
-        });
-    }
-
     private void OnItemTooltip(
         ItemKind _,
         uint itemID,
@@ -438,6 +410,27 @@ public sealed class ItemTooltipRemark : ModuleBase
 
     private static uint NormalizeItemID(ulong itemID) =>
         itemID <= uint.MaxValue ? ItemUtil.GetBaseId((uint)itemID).ItemId : 0;
+
+    private sealed class RemarkMenuEntry(ItemTooltipRemark module) : ContextMenuEntry
+    {
+        public override string Identifier => nameof(ItemTooltipRemark);
+
+        public override ContextMenuItem? Create(ContextMenuOpenedArgs args)
+        {
+            var itemID = OmniContextMenu.GetTargetItemID(args);
+            if (itemID == 0)
+                itemID = NormalizeItemID(DService.Instance().GameGUI.HoveredItem);
+            if (itemID == 0)
+                return null;
+
+            return new()
+            {
+                Name = OmniLoc.Get("Feature.ItemTooltipRemark.Menu"),
+                Prefix = OmniContextMenu.Prefix,
+                OnClicked = _ => module.OpenEditor(itemID)
+            };
+        }
+    }
 
 }
 

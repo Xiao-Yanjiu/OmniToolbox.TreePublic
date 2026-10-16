@@ -17,6 +17,7 @@ using OmenTools.Interop.Game.Lumina;
 using OmenTools.OmenService;
 using OmenTools.Threading.TaskHelper;
 using OmenTools.Threading.TaskHelper.Models;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -40,7 +41,7 @@ public sealed unsafe class AutoLogin(
         [
             new ModuleCommand(
                 "Feature.AutoLogin.CommandDescription",
-                "/omni 重新登陆 角色名@世界名")
+                OmniCommandCatalog.Format("login", "角色名@世界名"))
         ]
     };
 

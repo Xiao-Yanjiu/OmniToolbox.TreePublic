@@ -1,6 +1,7 @@
 using Dalamud.Plugin.Services;
 using OmenTools;
 using OmenTools.OmenService;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -22,7 +23,7 @@ public sealed class DisplayIDInformation(
         Category = ModuleCategory.Debug,
         Commands =
         [
-            new ModuleCommand("Feature.DisplayIdInformation.CommandDescription", "/omni 图标浏览器")
+            new ModuleCommand("Feature.DisplayIdInformation.CommandDescription", OmniCommandCatalog.Format("icons"))
         ]
     };
 

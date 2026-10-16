@@ -222,7 +222,6 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         selectedPreset = presets.Count == 0
             ? null
             : presets[Math.Clamp(selectedIndex, 0, presets.Count - 1)];
-        UpdateWindowTitle();
         ApplyData();
     }
 
@@ -317,6 +316,7 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
             return;
         }
 
+        Subtitle = FormatPresetCount(presets.Count);
         presetListNode.OptionsList = presets;
         ApplySelection();
     }
@@ -621,15 +621,6 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         PositionButton(applyButton, detailX, buttonY, buttonWidth);
         PositionButton(exportButton, detailX + buttonWidth + BUTTON_GAP, buttonY, buttonWidth);
         PositionButton(deleteButton, detailX + (buttonWidth + BUTTON_GAP) * 2f, buttonY, buttonWidth);
-    }
-
-    private void UpdateWindowTitle()
-    {
-        Subtitle = FormatPresetCount(presets.Count);
-        if (IsOpen)
-        {
-            WindowNode?.SetTitle(Title.ToString(), Subtitle?.ToString());
-        }
     }
 
     private static string FormatPresetCount(int presetCount) =>

@@ -6,6 +6,7 @@ using Lumina.Excel.Sheets;
 using OmenTools;
 using OmenTools.Dalamud.Services.Game.Object.Abstractions.ObjectKinds;
 using OmenTools.OmenService;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -29,7 +30,7 @@ public sealed class FoodReminder : ModuleBase
             "https://raw.githubusercontent.com/YouShux/OmniToolbox.Common/main/Assets/previews/Combat/FoodReminder-1.png",
         Commands =
         [
-            new ModuleCommand("Feature.FoodReminder.CommandDescription", "/omni 食物检查")
+            new ModuleCommand("Feature.FoodReminder.CommandDescription", OmniCommandCatalog.Format("food"))
         ]
     };
 

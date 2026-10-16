@@ -1,4 +1,5 @@
 using OmenTools.OmenService;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -19,7 +20,7 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
         SupportUrls = ["https://github.com/Angelways"],
         Commands =
         [
-            new(OmniLoc.Get("Feature.AutoIshgardRestoration.OpenCommand"), "/omni 自动重建伊修加德")
+            new("Feature.AutoIshgardRestoration.OpenCommand", OmniCommandCatalog.Format("ishgard"))
         ]
     };
 
@@ -78,10 +79,8 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
 
     public override bool TryHandleCommand(string command, string arguments)
     {
-        if (string.Equals(command.Trim(), ModuleName, StringComparison.OrdinalIgnoreCase))
-            return HandleCommandArguments(arguments);
-
-        return string.IsNullOrWhiteSpace(arguments) && HandleCommandArguments(command);
+        return string.Equals(command, "ishgard", StringComparison.OrdinalIgnoreCase) &&
+            HandleCommandArguments(arguments);
     }
 
     public override bool ResetSettings()
@@ -104,7 +103,7 @@ public sealed partial class AutoIshgardRestoration : ModuleBase
     private bool HandleCommandArguments(string arguments)
     {
         var command = arguments.Trim();
-        if (string.Equals(command, "自动重建伊修加德", StringComparison.OrdinalIgnoreCase) ||
+        if (command.Length == 0 ||
             string.Equals(command, "open", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(command, "窗口", StringComparison.OrdinalIgnoreCase))
         {

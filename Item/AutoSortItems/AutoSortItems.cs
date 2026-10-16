@@ -11,6 +11,7 @@ using OmenTools.Interop.Game.Helpers;
 using OmenTools.Interop.Game.Lumina;
 using OmenTools.OmenService;
 using OmenTools.Threading.TaskHelper;
+using OmniToolbox.Commands;
 using OmniToolbox.Common.Module.Abstractions;
 using OmniToolbox.Common.Module.Enums;
 using OmniToolbox.Common.Module.Models;
@@ -31,7 +32,7 @@ public sealed unsafe class AutoSortItems(AutoSortItemsConfig config) : ModuleBas
         RequiresPrivateProvider = true,
         Commands =
         [
-            new ModuleCommand("Feature.AutoSortItems.CommandDescription", "/omni 自动整理")
+            new ModuleCommand("Feature.AutoSortItems.CommandDescription", OmniCommandCatalog.Format("sort"))
         ]
     };
 
