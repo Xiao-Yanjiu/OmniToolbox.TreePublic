@@ -47,6 +47,7 @@ public sealed unsafe partial class BetterGlamourManagement(
 
     private BetterGlamourActionsNativeUI? actionsNativeUI;
     private BetterGlamourManagerNativeUI? managerNativeUI;
+    private BetterGlamourPortraitPreview? portraitPreview;
     private TaskHelper? taskHelper;
     private BetterGlamourPreset? activeTryOnPreset;
     private BetterGlamourPreset? boundTryOnPreset;
@@ -64,13 +65,21 @@ public sealed unsafe partial class BetterGlamourManagement(
                 TimeoutMS = 10_000
             };
             actionsNativeUI = new(TryOnInspect, SaveInspect, ExportInspect, OpenManager, ClearTryOn);
+            portraitPreview = new();
+            portraitPreview.Initialize(DService.Instance().PI.Create<OmniPreviewContext>()
+                ?? throw new InvalidOperationException("Preview service injection failed."));
+            portraitPreview.Enable();
+            EnableRemote();
             managerNativeUI = new(
                 SelectPreset,
-                _ => saveConfig(),
+                PresetChanged,
                 ChangePresetGearset,
                 StartTryOn,
                 CopyPreset,
-                DeletePreset);
+                DeletePreset,
+                ClearTryOn,
+                ImportClipboard,
+                portraitPreview);
             if (!FrameworkManager.Instance().Reg(OnFrameworkUpdate, 250))
             {
                 throw new InvalidOperationException("Better glamour management update registration failed.");
@@ -87,8 +96,12 @@ public sealed unsafe partial class BetterGlamourManagement(
 
     protected override void OnDisable()
     {
+        DisableRemote();
         DalamudServices.PluginInterface.UiBuilder.Draw -= Draw;
         FrameworkManager.Instance().Unreg(OnFrameworkUpdate);
+        managerNativeUI?.ClearPreviewTexture();
+        portraitPreview?.Dispose();
+        portraitPreview = null;
         ClearTryOn();
         taskHelper?.Dispose();
         taskHelper = null;
@@ -145,6 +158,7 @@ public sealed unsafe partial class BetterGlamourManagement(
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        RemoteTick();
         if (!DService.Instance().ClientState.IsLoggedIn)
         {
             activeTryOnPreset = null;
@@ -385,10 +399,32 @@ public sealed unsafe partial class BetterGlamourManagement(
         {
             managerNativeUI.Open();
         }
+        if (selectedPresetIndex >= 0 && selectedPresetIndex < config.Presets.Count)
+            QueuePortraitPreview(config.Presets[selectedPresetIndex]);
+        else
+        {
+            managerNativeUI?.ClearPreviewTexture();
+            portraitPreview?.CancelPreview();
+        }
     }
 
-    private void SelectPreset(BetterGlamourPreset preset) =>
+    private void SelectPreset(BetterGlamourPreset preset)
+    {
         selectedPresetIndex = config.Presets.IndexOf(preset);
+        QueuePortraitPreview(preset);
+    }
+
+    private void PresetChanged(BetterGlamourPreset preset)
+    {
+        saveConfig();
+        QueuePortraitPreview(preset);
+    }
+
+    private void QueuePortraitPreview(BetterGlamourPreset preset)
+    {
+        managerNativeUI?.ClearPreviewTexture();
+        portraitPreview?.QueuePreset(preset);
+    }
 
     private void ChangePresetGearset(BetterGlamourPreset preset, int gearsetIndex)
     {
@@ -460,6 +496,13 @@ public sealed unsafe partial class BetterGlamourManagement(
         selectedPresetIndex = Math.Min(index, config.Presets.Count - 1);
         saveConfig();
         managerNativeUI?.UpdateData(config.Presets, selectedPresetIndex);
+        if (selectedPresetIndex >= 0)
+            QueuePortraitPreview(config.Presets[selectedPresetIndex]);
+        else
+        {
+            managerNativeUI?.ClearPreviewTexture();
+            portraitPreview?.CancelPreview();
+        }
     }
 
     private void NotifyNoInspectData() => OmniNotifier.Popup(
@@ -513,6 +556,7 @@ public sealed class BetterGlamourManagementConfig
 [Serializable]
 public sealed class BetterGlamourPreset
 {
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = string.Empty;
 
     public int GearsetIndex { get; set; } = -1;

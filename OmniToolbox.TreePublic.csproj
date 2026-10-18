@@ -6,6 +6,7 @@
     <AssemblyName>OmniToolbox.TreePublic</AssemblyName>
     <RootNamespace>OmniToolbox</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>true</UseWindowsForms>
     <Use_DalamudPackager>false</Use_DalamudPackager>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
@@ -19,6 +20,10 @@
     <ProjectReference Include="..\OmniToolbox.Common\OmniToolbox.Common.csproj" />
     <ProjectReference Include="..\lib\KamiToolKit\KamiToolKit.csproj" />
     <ProjectReference Include="..\lib\OmenTools\OmenTools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>

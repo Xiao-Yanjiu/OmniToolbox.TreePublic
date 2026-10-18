@@ -78,28 +78,42 @@ public sealed unsafe partial class BetterGlamourManagement
 
     private void CopyPreset(BetterGlamourPreset preset)
     {
-        var builder = new StringBuilder();
-        builder.AppendLine(string.Format(
-            OmniLoc.Get("Feature.BetterGlamourManagement.Export.Single"),
-            OmniLoc.Get("Feature.BetterGlamourManagement.Hairstyle"),
-            GetHairstyleName(preset.HairstyleID)));
-        builder.AppendLine(string.Format(
-            OmniLoc.Get("Feature.BetterGlamourManagement.Export.Weapon"),
-            FormatWeapon(preset)));
-        AppendPair(builder, preset, Parts[0], Parts[5]);
-        AppendPair(builder, preset, Parts[1], Parts[6]);
-        AppendPair(builder, preset, Parts[2], Parts[7]);
-        AppendPair(builder, preset, Parts[3], Parts[8]);
-        AppendPair(builder, preset, Parts[4], Parts[9]);
-        builder.Append(string.Format(
-            OmniLoc.Get("Feature.BetterGlamourManagement.Export.Single"),
-            OmniLoc.Get("Feature.BetterGlamourManagement.Part.Glasses"),
-            GetGlassesName(preset.GlassesID)));
-        ImGui.SetClipboardText(builder.ToString());
+        ImGui.SetClipboardText(GlamourClipboard.Export(preset));
         OmniNotifier.Popup(
             Info.Title,
             OmniLoc.Get("Feature.BetterGlamourManagement.Copied"),
             Dalamud.Interface.ImGuiNotification.NotificationType.Success);
+    }
+
+    private void ImportClipboard()
+    {
+        try
+        {
+            if (config.Presets.Count >= MaxPresetCount) throw new InvalidOperationException($"最多保存 {MaxPresetCount} 个条目。");
+            var preset = GlamourClipboard.Import(ImGui.GetClipboardText());
+            // Resolve IDs before saving anything; a failed import must leave the collection unchanged.
+            foreach (var item in preset.Items.Where(x => x.ItemID != 0))
+            {
+                uint id = item.ItemID > 1000000 ? item.ItemID - 1000000 : item.ItemID > 500000 ? item.ItemID - 500000 : item.ItemID;
+                if (!LuminaGetter.TryGetRow<Item>(id, out _)) throw new InvalidDataException($"物品 ID 不存在：{item.ItemID}");
+            }
+            foreach (var dye in preset.Items.SelectMany(x => new[] {x.Stain0, x.Stain1}).Distinct().Where(x=>x!=0))
+                if (!LuminaGetter.TryGetRow<Stain>(dye, out _)) throw new InvalidDataException($"染色 ID 不存在：{dye}");
+            if (preset.HairstyleID != 0 && !LuminaGetter.TryGetRow<CharaMakeCustomize>(preset.HairstyleID, out _)) throw new InvalidDataException("发型 ID 不存在。");
+            if (preset.GlassesID != 0 && !LuminaGetter.TryGetRow<Glasses>(preset.GlassesID, out _)) throw new InvalidDataException("面部装饰 ID 不存在。");
+            int oldSelection = selectedPresetIndex;
+            config.Presets.Add(preset);
+            selectedPresetIndex = config.Presets.Count - 1;
+            try { saveConfig(); }
+            catch { config.Presets.Remove(preset); selectedPresetIndex = oldSelection; throw; }
+            managerNativeUI?.UpdateData(config.Presets, selectedPresetIndex);
+            QueuePortraitPreview(preset);
+            OmniNotifier.Popup(Info.Title, $"已导入新条目：{preset.Name}", Dalamud.Interface.ImGuiNotification.NotificationType.Success);
+        }
+        catch (Exception error)
+        {
+            OmniNotifier.Popup(Info.Title, "导入失败：" + error.Message, Dalamud.Interface.ImGuiNotification.NotificationType.Error);
+        }
     }
 
     private static void AppendPair(
@@ -235,7 +249,7 @@ public sealed unsafe partial class BetterGlamourManagement
         {
             new(0, OmniLoc.Get("Feature.BetterGlamourManagement.None"), 0)
         };
-        foreach (var hairstyle in HairstyleData.GetPurchasableRows())
+        foreach (var hairstyle in LuminaGetter.Get<CharaMakeCustomize>().Where(static row => row.HintItem.RowId != 0))
         {
             var name = GetHairstyleName(hairstyle.RowId);
             if (string.IsNullOrWhiteSpace(name) || name == OmniLoc.Get("Feature.BetterGlamourManagement.None"))
@@ -296,7 +310,7 @@ public sealed unsafe partial class BetterGlamourManagement
 
         if (LuminaGetter.TryGetRow<CharaMakeCustomize>(hairstyleID, out var hairstyle))
         {
-            var name = HairstyleData.GetUnlockItem(hairstyle)?.Name.ExtractText();
+            var name = hairstyle.HintItem.Value.Name.ExtractText();
             if (!string.IsNullOrWhiteSpace(name))
             {
                 return name;

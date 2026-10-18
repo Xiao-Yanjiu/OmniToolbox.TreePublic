@@ -1,4 +1,6 @@
 using System.Drawing;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.System.Input;
 using Dalamud.Interface;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit.BaseTypes;
@@ -11,6 +13,9 @@ using OmenTools.Extensions;
 using OmenTools.Interop.Game.Lumina;
 using OmniToolbox.UI;
 
+// Pinned to the installed KamiToolKit shipped with Omni 1.1.7.2; revalidate on SDK upgrades.
+#pragma warning disable KTKExperimental_TextureImageNode
+
 namespace OmniToolbox.TreePublic;
 
 internal sealed class BetterGlamourManagerNativeUI : NativeAddon
@@ -21,6 +26,20 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
     private readonly Action<BetterGlamourPreset> onApply;
     private readonly Action<BetterGlamourPreset> onExport;
     private readonly Action<BetterGlamourPreset> onDelete;
+    private readonly Action onRestore;
+    private readonly Action onImport;
+    private readonly BetterGlamourPortraitPreview portraitPreview;
+    private TextureImageNode? previewImage;
+    private TextNode? previewStatus;
+    private TextNode? previewTitle;
+    private readonly List<TextureButtonNode> previewButtons = [];
+    private readonly List<SimpleImageNode> previewButtonRings = [];
+    private SimpleNineGridNode? previewBorder;
+    private CollisionNode? previewInput;
+    private bool previewDragLeft, previewDragRight, previewHovered;
+    private static readonly uint[] PreviewButtonNodes = [32, 33, 34, 35, 37, 39];
+    private Vector2 previewLastMouse;
+    private nint boundPreviewTexture;
     private readonly List<BetterGlamourEditorRow> editorRows = [];
     private readonly List<GearsetOption> gearsetOptions = [];
     private readonly List<BetterGlamourItemSearchResult> itemSearchResults = [];
@@ -42,6 +61,8 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
     private TextButtonNode? applyButton;
     private TextButtonNode? exportButton;
     private TextButtonNode? deleteButton;
+    private TextButtonNode? restoreButton;
+    private TextButtonNode? importButton;
     private BetterGlamourDyePickerNativeUI? dyePicker;
     private SimpleNineGridNode? itemSearchBackgroundNode;
     private ListNode<BetterGlamourItemSearchResult, BetterGlamourItemSearchResultNode>? itemSearchResultsNode;
@@ -54,12 +75,15 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         Action<BetterGlamourPreset, int> onGearsetChanged,
         Action<BetterGlamourPreset> onApply,
         Action<BetterGlamourPreset> onExport,
-        Action<BetterGlamourPreset> onDelete)
+        Action<BetterGlamourPreset> onDelete,
+        Action onRestore,
+        Action onImport,
+        BetterGlamourPortraitPreview portraitPreview)
     {
         InternalName = "OmniBetterGlamourManager";
         Title = OmniLoc.Get("Feature.BetterGlamourManagement.WindowTitle");
         Subtitle = FormatPresetCount(0);
-        Size = new(750f, 600f);
+        Size = new(1050f, 650f);
         ContentPadding = new(10f, 8f);
         RememberClosePosition = true;
         CreateWindowNode = static () => new WindowNode { ShowCloseButton = true };
@@ -69,6 +93,9 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         this.onApply = onApply;
         this.onExport = onExport;
         this.onDelete = onDelete;
+        this.onRestore = onRestore;
+        this.onImport = onImport;
+        this.portraitPreview = portraitPreview;
     }
 
     protected override unsafe void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan)
@@ -141,7 +168,12 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         itemListNode.AttachNode(this);
 
         applyButton = CreateButton("Feature.BetterGlamourManagement.Apply", () => Invoke(onApply));
-        exportButton = CreateButton("Feature.BetterGlamourManagement.Export", () => Invoke(onExport));
+        exportButton = new TextButtonNode { String = "导出到剪贴板", OnClick = () => Invoke(onExport) };
+        exportButton.AttachNode(this);
+        importButton = new TextButtonNode { String = "从剪贴板导入", OnClick = onImport };
+        importButton.AttachNode(this);
+        restoreButton = new TextButtonNode { String = "还原外观", OnClick = onRestore };
+        restoreButton.AttachNode(this);
         deleteButton = CreateButton("Feature.BetterGlamourManagement.Delete", () => Invoke(onDelete));
 
         itemSearchBackgroundNode = new()
@@ -168,12 +200,47 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         itemSearchResultsNode.AttachNode(this);
         itemSearchResultsNode.IsVisible = false;
 
+        previewTitle = new TextNode { String = "外观预览 · 选择即更新", FontSize = 14 };
+        previewTitle.AttachNode(this);
+        previewStatus = new TextNode { String = "选择方案后自动预览，不会应用到场景人物。", TextFlags = TextFlags.WordWrap | TextFlags.MultiLine, FontSize = 12 };
+        previewStatus.AttachNode(this);
+        previewBorder = new SimpleNineGridNode
+        {
+            TexturePath = "ui/uld/PreviewA.tex", TextureCoordinates = Vector2.Zero, TextureSize = new(36, 36),
+            TopOffset = 14, BottomOffset = 14, LeftOffset = 14, RightOffset = 14
+        };
+        previewBorder.AttachNode(this);
+        previewInput = new CollisionNode { TextTooltip = "左键拖动旋转 · 右键拖动平移 · 滚轮缩放" };
+        previewInput.AddEvent(AtkEventType.MouseOver, () => previewHovered = true);
+        previewInput.AddEvent(AtkEventType.MouseOut, () => previewHovered = false);
+        previewInput.AddEvent(AtkEventType.MouseDown, () => StartPreviewDrag());
+        previewInput.AddEvent(AtkEventType.MouseWheel, (listener, type, param, ev, data) => {
+            if (data != null && portraitPreview.Texture != 0)
+                portraitPreview.CameraPixels(0, 0, 0, Math.Sign(data->MouseData.WheelDirection));
+        });
+        previewInput.AttachNode(this);
+        // Exact icon rectangles from fittingroom.uld, widget nodes 32..39.
+        var coordinates = new Vector2[] { new(96,112), new(72,112), new(120,112), new(144,112),
+            new(48,112), new(48,136) };
+        for (int i = 0; i < coordinates.Length; i++)
+        {
+            uint nativeNode = PreviewButtonNodes[i];
+            var ring = new SimpleImageNode { TexturePath = "ui/uld/CircleButtons.tex", TextureCoordinates = new(84,84), TextureSize = new(28,28), Size = new(28,28), IsVisible = false };
+            ring.AttachNode(this); previewButtonRings.Add(ring);
+            var button = new TextureButtonNode { TexturePath = "ui/uld/CircleButtons.tex", TextureCoordinates = coordinates[i], TextureSize = new(24,24), Size = new(24,24), OnClick = () => portraitPreview.ClickNativeButton(nativeNode) };
+            button.AttachNode(this); previewButtons.Add(button);
+        }
+
         ResizeContent();
         ApplyData();
     }
 
     protected override unsafe void OnUpdate(AtkUnitBase* addon)
     {
+        UpdatePortrait();
+        UpdatePreviewMouse();
+        for (int i = 0; i < previewButtonRings.Count; i++)
+            previewButtonRings[i].IsVisible = portraitPreview.NativeButtonChecked(PreviewButtonNodes[i]);
         presetListNode?.Update();
         itemListNode?.Update();
         itemSearchResultsNode?.Update();
@@ -191,6 +258,12 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
 
     protected override unsafe void OnFinalize(AtkUnitBase* addon)
     {
+        ClearPreviewTexture();
+        portraitPreview.CancelPreview();
+        previewTitle = previewStatus = null;
+        previewButtons.Clear(); previewButtonRings.Clear();
+        previewInput = null; previewBorder = null;
+        previewDragLeft = previewDragRight = false;
         dyePicker?.Close();
         dyePicker?.Dispose();
         dyePicker = null;
@@ -214,6 +287,81 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         applyButton = null;
         exportButton = null;
         deleteButton = null;
+        restoreButton = null;
+        importButton = null;
+    }
+
+    private unsafe void StartPreviewDrag()
+    {
+        var input = UIInputData.Instance();
+        if (portraitPreview.Texture == 0 || input == null) return;
+        // Native addon events and ImGui IO do not share the same input filtering.
+        // Read the game's unfiltered cursor for both press and held state.
+        var cursor = input->CursorInputs;
+        if (!cursor.IsGameWindowFocused) return;
+        var buttons = cursor.MouseButtonHeldFlags | cursor.MouseButtonPressedFlags;
+        previewDragLeft = (buttons & MouseButtonFlags.LBUTTON) != 0;
+        previewDragRight = (buttons & MouseButtonFlags.RBUTTON) != 0;
+        previewLastMouse = new(cursor.PositionX, cursor.PositionY);
+    }
+    private unsafe void UpdatePreviewMouse()
+    {
+        var input = UIInputData.Instance();
+        if (portraitPreview.Texture == 0 || input == null || !input->CursorInputs.IsGameWindowFocused)
+        { previewDragLeft = previewDragRight = false; return; }
+        var cursor = input->CursorInputs;
+        if (previewHovered && (cursor.MouseButtonPressedFlags & (MouseButtonFlags.LBUTTON | MouseButtonFlags.RBUTTON)) != 0)
+            StartPreviewDrag();
+        if ((cursor.MouseButtonHeldFlags & MouseButtonFlags.LBUTTON) == 0) previewDragLeft = false;
+        if ((cursor.MouseButtonHeldFlags & MouseButtonFlags.RBUTTON) == 0) previewDragRight = false;
+        var position = new Vector2(cursor.PositionX, cursor.PositionY);
+        if (previewDragLeft || previewDragRight)
+        {
+            var delta = position - previewLastMouse;
+            portraitPreview.CameraPixels(previewDragLeft ? delta.X : 0,
+                previewDragRight ? delta.X : 0, previewDragRight ? -delta.Y : 0, 0);
+        }
+        previewLastMouse = position;
+    }
+
+    public unsafe void ClearPreviewTexture()
+    {
+        var oldImage = previewImage;
+        var oldTexture = (FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Texture*)boundPreviewTexture;
+        previewImage = null;
+        boundPreviewTexture = 0;
+        try { oldImage?.Dispose(); }
+        finally { if (oldTexture != null) oldTexture->DecRef(); }
+    }
+
+    private unsafe void UpdatePortrait()
+    {
+        var texture = portraitPreview.Texture;
+        if (texture != boundPreviewTexture)
+        {
+            ClearPreviewTexture();
+            if (texture != 0)
+            {
+                var nativeTexture = (FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Texture*)texture;
+                nativeTexture->IncRef();
+                boundPreviewTexture = texture;
+                try
+                {
+                    previewImage = new TextureImageNode
+                    {
+                        IsVisible = true,
+                        TextureCoordinates = Vector2.Zero,
+                        TextureSize = new(nativeTexture->ActualWidth, nativeTexture->ActualHeight),
+                        FitTexture = true
+                    };
+                    previewImage.SetTexture(nativeTexture);
+                    previewImage.AttachNode(this);
+                }
+                catch { ClearPreviewTexture(); throw; }
+            }
+            ResizeContent();
+        }
+        if (previewStatus is not null) previewStatus.String = portraitPreview.Message;
     }
 
     public void UpdateData(List<BetterGlamourPreset> newPresets, int selectedIndex)
@@ -564,6 +712,7 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
             dyeHeaderNode.IsVisible = visible;
         if (itemListNode is not null)
             itemListNode.IsVisible = visible;
+        if (restoreButton is not null) restoreButton.IsVisible = true;
         if (applyButton is not null)
             applyButton.IsVisible = visible;
         if (exportButton is not null)
@@ -578,15 +727,35 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
         const float SEPARATOR_GAP = 12f;
         const float LABEL_WIDTH = 72f;
         const float BUTTON_GAP = 8f;
+        const float PREVIEW_WIDTH = 280f;
         var contentX = ContentStartPosition.X;
         var contentY = ContentStartPosition.Y;
         var detailX = contentX + PRESET_WIDTH + SEPARATOR_GAP;
-        var detailWidth = MathF.Max(420f, ContentSize.X - PRESET_WIDTH - SEPARATOR_GAP);
+        var detailWidth = MathF.Max(420f, ContentSize.X - PRESET_WIDTH - SEPARATOR_GAP - PREVIEW_WIDTH - 12f);
+        var previewX = detailX + detailWidth + 12f;
+        if (previewTitle is not null) { previewTitle.Position = new(previewX, contentY); previewTitle.Size = new(PREVIEW_WIDTH, 24f); }
+        if (previewStatus is not null) { previewStatus.Position = new(previewX, contentY + ContentSize.Y - 62f); previewStatus.Size = new(PREVIEW_WIDTH, 60f); }
+        float imageHeight = MathF.Max(100, ContentSize.Y - 128f);
+        float ratio = portraitPreview.AspectRatio;
+        float width = MathF.Min(PREVIEW_WIDTH - 8f, imageHeight * ratio);
+        var imagePosition = new Vector2(previewX + (PREVIEW_WIDTH - width) / 2, contentY + 28f);
+        var imageSize = new Vector2(width, width / ratio);
+        if (previewImage is not null) { previewImage.Position = imagePosition; previewImage.Size = imageSize; }
+        if (previewBorder is not null) { previewBorder.Position = imagePosition - new Vector2(4,3); previewBorder.Size = imageSize + new Vector2(8,8); }
+        if (previewInput is not null) { previewInput.Position = imagePosition; previewInput.Size = imageSize; }
+        float buttonStart = previewX + (PREVIEW_WIDTH - previewButtons.Count * 28f) / 2;
+        for (int i = 0; i < previewButtons.Count; i++)
+        {
+            var buttonPosition = new Vector2(buttonStart + i * 28f, contentY + ContentSize.Y - 92f);
+            previewButtons[i].Position = buttonPosition;
+            previewButtons[i].Size = new(24,24);
+            previewButtonRings[i].Position = buttonPosition - new Vector2(2,2);
+        }
 
         if (presetListNode is not null)
         {
             presetListNode.Position = new(contentX, contentY);
-            presetListNode.Size = new(PRESET_WIDTH, ContentSize.Y);
+            presetListNode.Size = new(PRESET_WIDTH, ContentSize.Y - 36f);
         }
 
         if (separatorNode is not null)
@@ -617,10 +786,12 @@ internal sealed class BetterGlamourManagerNativeUI : NativeAddon
             itemListNode.Size = new(detailWidth, MathF.Max(100f, buttonY - headerY - 34f));
         }
 
-        var buttonWidth = MathF.Max(80f, (detailWidth - BUTTON_GAP * 2f) / 3f);
+        PositionButton(importButton, contentX, buttonY, PRESET_WIDTH);
+        var buttonWidth = MathF.Max(80f, (detailWidth - BUTTON_GAP * 3f) / 4f);
         PositionButton(applyButton, detailX, buttonY, buttonWidth);
-        PositionButton(exportButton, detailX + buttonWidth + BUTTON_GAP, buttonY, buttonWidth);
-        PositionButton(deleteButton, detailX + (buttonWidth + BUTTON_GAP) * 2f, buttonY, buttonWidth);
+        PositionButton(restoreButton, detailX + buttonWidth + BUTTON_GAP, buttonY, buttonWidth);
+        PositionButton(exportButton, detailX + (buttonWidth + BUTTON_GAP) * 2f, buttonY, buttonWidth);
+        PositionButton(deleteButton, detailX + (buttonWidth + BUTTON_GAP) * 3f, buttonY, buttonWidth);
     }
 
     private static string FormatPresetCount(int presetCount) =>
@@ -1083,3 +1254,4 @@ internal sealed class BetterGlamourItemIconNode : SimpleComponentNode
         iconNode.Position = new((Width - 48f * scale) / 2f, (Height - 48f * scale) / 2f);
     }
 }
+
